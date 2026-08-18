@@ -6,8 +6,7 @@ Standard Bluetooth profiles carry audio and the media keys, but they do not
 carry noise control mode, per-pod battery, or in-ear status. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
 protocol directly: the whole backend is one Python file on the standard
-library. Nothing to compile, no systemd unit of its own, no companion app,
-and one license for the whole repository.
+library. Nothing to compile, no systemd unit of its own, no companion app.
 
 ![the panel](preview.png)
 
@@ -22,17 +21,14 @@ The panel shows:
 - The battery level of each pod, and of the case when it reports one. A bolt
   marks a component that charges.
 - Buttons for Off, Transparency, Adaptive, and ANC, with the current mode
-  selected. The Off mode is absent on AirPods Pro 3, which has no such mode.
+  selected. Off is absent on AirPods Pro 3.
 - The adaptive noise level (Less, Medium, More) while Adaptive is the mode
 - Switches for Conversation Awareness and One-Bud ANC. A switch is dim until
   the device reports the control.
 
 The bar shows an AirPods icon with the battery level of the lowest pod. The
-widget leaves the bar while no AirPods are connected, the way the microphone
-and media widgets do. Connecting is BlueZ's work, not the panel's.
-
-Volume and output selection stay in the stock Audio panel, which already
-does them well. This panel only adds what the stock panels cannot see.
+widget leaves the bar while no AirPods are connected. Volume, output
+selection, and pairing stay in the stock Audio and Bluetooth panels.
 
 ## Install
 
@@ -41,8 +37,7 @@ omarchy plugin add https://github.com/s0up4200/omarchy-airpods.git
 omarchy plugin enable soup.airpods
 ```
 
-To put the widget somewhere else on the bar, give `omarchy bar move` a
-placement:
+To move the widget:
 
 ```bash
 omarchy bar move soup.airpods --section right --after omarchy.clock
@@ -61,7 +56,7 @@ Restart Bluetooth and reconnect the AirPods:
 sudo systemctl restart bluetooth
 ```
 
-Removal is one command; only the `DeviceID` line above stays behind:
+Removal leaves only the `DeviceID` line behind:
 
 ```bash
 omarchy plugin remove soup.airpods
@@ -72,9 +67,6 @@ omarchy plugin remove soup.airpods
 The AirPods accept one AAP client. If [LibrePods](https://github.com/librepods-org/librepods)
 holds the channel, this plugin reads stale data and its commands are ignored.
 Use one or the other.
-
-LibrePods still does more: hearing aid settings, head gestures, and
-renaming. This plugin gives you the everyday controls from the bar.
 
 ## Command line
 
@@ -99,26 +91,22 @@ what the panel runs:
  "adaptive_level": 50}
 ```
 
-The AirPods report the mode and the model one time for each Bluetooth
-connection, to the client that holds the channel at that moment. A client
-that connects later reads almost nothing. This is why the panel keeps one
-`watch` open. `watch` also takes `key value` commands on stdin (`mode anc`,
-`ca on`, `onebud off`, `adaptive 50`), because a write must go out on the
-channel that the AirPods are listening to. A control the device never
-reported is `null`, which is how an unsupported model reads.
+`watch` also takes `key value` commands on stdin: `mode anc`, `ca on`,
+`onebud off`, `adaptive 50`. The AirPods dump mode and model once per
+Bluetooth connection, to whichever client holds the channel then — a second
+client reads mostly `null`.
 
-A `null` battery level means the component did not report one, and the panel
-shows `—`. The case does this while the pods are in your ears. It also does it
-when you put one pod in the case, because that disconnects the other pod.
+A `null` value means the device has not reported it; the panel shows `—` or
+a dim control. Putting one pod in the case disconnects the other pod, so
+the panel can go quiet mid-use.
 
 ## Interactions
 
 - Bar icon: a click of any button toggles the panel.
 - Panel: Tab and Shift+Tab move to the neighboring bar panel, Esc closes. The
   mode buttons and the switches are mouse-only.
-- IPC: `omarchy-shell soup.airpods <open|close|show|hide|toggle>`. This also
-  works while the AirPods are away and the widget is off the bar, which is
-  how you reach the settings then.
+- IPC: `omarchy-shell soup.airpods <open|close|show|hide|toggle>`. Works
+  while the widget is off the bar.
 
 ## Settings
 
@@ -130,8 +118,7 @@ command line:
 omarchy bar set soup.airpods showBattery false --json
 ```
 
-Booleans need `--json`. Without it the value is stored as a string, which the
-widget reads as off whichever value you type.
+Booleans need `--json`; a bare value is stored as a string and reads as off.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -146,8 +133,7 @@ are not tested. Reports are welcome.
 
 ## Development
 
-The shell watches the plugin directory, but a bar widget that is already on
-the bar keeps the QML it loaded. After an edit, run:
+A widget on the bar keeps the QML it loaded. After an edit, run:
 
 ```bash
 omarchy restart shell
