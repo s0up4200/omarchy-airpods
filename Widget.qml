@@ -6,7 +6,9 @@ import qs.Ui
 
 // Bar widget for AirPods: headphone icon with the lowest pod's battery, and a
 // popup that switches noise control mode. All device work happens in bin/airpods,
-// which speaks Apple's AAP protocol; this file only renders what it prints.
+// which holds one AAP channel open and prints a JSON line per change. Mode
+// changes go back to it on stdin, because the AirPods obey only the client
+// that holds the channel.
 Panel {
   id: root
   moduleName: "soup.airpods"
@@ -16,11 +18,12 @@ Panel {
   // checkout path without anything on PATH.
   readonly property string script: Qt.resolvedUrl("bin/airpods").toString().replace("file://", "")
 
-  readonly property int refreshIntervalSec: setting("refreshIntervalSec", 60)
   readonly property bool showBattery: setting("showBattery", true) === true
 
   property bool connected: false
   property string mode: ""
+  property string deviceName: ""
+  property string model: ""
   property var battery: ({})
 
   readonly property var modeOptions: [
@@ -40,12 +43,6 @@ Panel {
   readonly property bool showsPercent: showBattery && connected
     && lowestBattery >= 0 && !button.vertical
 
-  function modeLabel() {
-    for (var i = 0; i < modeOptions.length; i++)
-      if (modeOptions[i].value === mode) return modeOptions[i].label
-    return "Unknown mode"
-  }
-
   function batteryText(component) {
     var level = battery ? battery[component] : undefined
     return (level === undefined || level === null) ? "—" : level + "%"
@@ -61,52 +58,35 @@ Panel {
     }
     connected = data.connected === true
     mode = connected ? (data.mode || "") : ""
+    deviceName = connected ? (data.name || "") : ""
+    model = connected ? (data.model || "") : ""
     battery = connected && data.battery ? data.battery : ({})
   }
 
-  function refresh() {
-    if (statusProcess.running) return
-    statusProcess.command = [root.script, "status"]
-    statusProcess.running = true
-  }
-
   function setMode(value) {
-    if (setProcess.running || !connected) return
-    // Paint the new mode straight away; the refresh after the write confirms it.
+    if (!connected) return
+    // Paint the new mode straight away; the next line from the watcher confirms it.
     mode = value
-    setProcess.command = [root.script, "set", value]
-    setProcess.running = true
+    aap.write(value + "\n")
   }
 
   Process {
-    id: statusProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: statusOut; waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode === 0) root.applyStatus(String(statusOut.text || ""))
-      else root.connected = false
+    id: aap
+    command: [root.script, "watch"]
+    running: true
+    stdinEnabled: true
+    stdout: SplitParser { onRead: function(line) { root.applyStatus(line) } }
+    onExited: {
+      root.connected = false
+      restart.start()
     }
   }
 
-  Process {
-    id: setProcess
-    running: false
-    command: []
-    onExited: function() { root.refresh() }
-  }
-
   Timer {
-    // One poll opens a short Bluetooth channel, so poll slowly when the popup is
-    // closed and quickly while the user is looking at it.
-    interval: (root.opened ? 10 : Math.max(15, root.refreshIntervalSec)) * 1000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: root.refresh()
+    id: restart
+    interval: 2000
+    onTriggered: aap.running = true
   }
-
-  onOpenedChanged: if (opened) refresh()
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -151,8 +131,8 @@ Panel {
 
         PanelHero {
           width: parent.width
-          title: "AirPods"
-          meta: root.connected ? root.modeLabel() : "Not connected"
+          title: root.deviceName || "AirPods"
+          meta: root.connected ? root.model : "Not connected"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
           iconOpacity: root.connected ? 1.0 : 0.5
@@ -221,13 +201,27 @@ Panel {
             text: "Noise control"
           }
 
-          ButtonGroup {
+          Row {
             id: modeGroup
-            options: root.modeOptions
-            value: root.mode
-            foreground: root.bar.foreground
-            fontFamily: root.bar.fontFamily
-            onChanged: function(value) { root.setMode(value) }
+            spacing: Style.spacing.md
+
+            Repeater {
+              model: root.modeOptions
+
+              Button {
+                required property var modelData
+
+                text: modelData.label
+                // `selected` is the whole state model. A cursor flag as well
+                // would latch on and light a second chip.
+                selected: modelData.value === root.mode
+                bordered: true
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                fontSize: Style.font.bodySmall
+                onClicked: root.setMode(modelData.value)
+              }
+            }
           }
         }
       }

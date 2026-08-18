@@ -1,18 +1,28 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # Read and control AirPods over Apple's AAP protocol: noise control mode,
-# per-pod battery, and in-ear status. Standard Bluetooth profiles do not
-# carry any of this, so it speaks the vendor protocol on L2CAP PSM 0x1001.
+# per-pod battery, and the model. Standard Bluetooth profiles do not carry
+# any of this, so it speaks the vendor protocol on L2CAP PSM 0x1001.
 #
 # Only one client can hold that channel. Run LibrePods or this, never both:
-# the AirPods ignore commands from the second client. See the README's
-# AirPods section.
+# the AirPods ignore commands from the second client.
+#
+# The AirPods send the mode and the model once per Bluetooth connection, to
+# whichever client is on the channel at that moment. A client that connects
+# later gets battery levels and nothing else. `watch` therefore holds one
+# channel open and reports every change, and it takes mode names on stdin
+# so that writes go out on that same channel.
 #
 # Usage:
-#   airpods status                              JSON on stdout
-#   airpods set off|anc|transparency|adaptive
+#   airpods watch                               a JSON line per change
+#   airpods status                              one JSON line, then exit
 #   airpods selftest                            parse check, no Bluetooth
+#
+# `status` is for a machine with no panel running. While the panel holds the
+# channel, a second client reads almost nothing.
 import json
+import os
+import select
 import socket
 import subprocess
 import sys
@@ -30,7 +40,7 @@ MODE_NAMES = {v: k for k, v in MODES.items()}
 COMPONENTS = {0x01: "headphone", 0x02: "right", 0x04: "left", 0x08: "case"}
 
 LISTENING_MODE = 0x0D  # control command identifier
-OP_BATTERY, OP_CONTROL = 0x04, 0x09
+OP_BATTERY, OP_CONTROL, OP_INFO = 0x04, 0x09, 0x1D
 
 
 def connected_address():
@@ -65,6 +75,17 @@ def parse(packet, state):
                 # reading. Report it as unknown rather than as an empty pod.
                 state["battery"][name] = None if status == 0x04 else level
 
+    elif opcode == OP_INFO and len(payload) >= 8:
+        # A run of NUL-separated strings: name, model, manufacturer, then
+        # serial numbers and firmware versions. Only the first two are used;
+        # the serial numbers stay out of the output on purpose.
+        fields = [f.decode("ascii") for f in payload[4:].split(b"\x00")
+                  if len(f) >= 2 and all(32 <= c < 127 for c in f)]
+        if fields:
+            state["name"] = fields[0]
+        if len(fields) > 1:
+            state["model"] = fields[1]
+
     elif opcode == OP_CONTROL and len(payload) >= 7:
         if payload[2] == LISTENING_MODE:
             state["mode"] = MODE_NAMES.get(payload[3])
@@ -79,7 +100,8 @@ def open_channel(address, timeout=5):
 
 
 def status(address):
-    state = {"connected": True, "address": address, "mode": None, "battery": {}}
+    state = {"connected": True, "address": address, "name": None, "model": None,
+             "mode": None, "battery": {}}
     sock = open_channel(address)
     # The AirPods drop packets that arrive too soon after the handshake, so
     # keep the same spacing LibrePods uses.
@@ -101,21 +123,63 @@ def status(address):
     return state
 
 
-def set_mode(address, mode):
-    sock = open_channel(address)
-    time.sleep(0.3)
-    sock.send(HEADER + bytes([0x09, 0x00, LISTENING_MODE, MODES[mode], 0x00, 0x00, 0x00]))
-    time.sleep(0.3)
-    sock.close()
+def watch():
+    """Hold the channel open and print a JSON line whenever the state changes."""
+    while True:
+        address = connected_address()
+        if not address:
+            print(json.dumps({"connected": False}), flush=True)
+            time.sleep(5)
+            continue
+        try:
+            with open_channel(address) as sock:
+                time.sleep(0.3)
+                sock.send(FEATURE_FLAGS)
+                time.sleep(0.3)
+                sock.send(NOTIFICATIONS)
+                sock.settimeout(None)
+                state = {"connected": True, "address": address, "name": None,
+                         "model": None, "mode": None, "battery": {}}
+                last = ""
+                while True:
+                    # Read the file descriptor, not sys.stdin: a buffered read
+                    # would strand a second mode name that arrived in the same
+                    # write, because select only ever sees the descriptor.
+                    ready = select.select([sock, 0], [], [])[0]
+                    for source in ready:
+                        if source is sock:
+                            packet = sock.recv(1024)
+                            if not packet:
+                                raise OSError("channel closed")
+                            parse(packet, state)
+                            continue
+                        command = os.read(0, 4096)
+                        if not command:
+                            return  # the caller went away
+                        for name in command.decode().split():
+                            if name in MODES:
+                                sock.send(HEADER + bytes([0x09, 0x00, LISTENING_MODE,
+                                                          MODES[name], 0, 0, 0]))
+                    line = json.dumps(state)
+                    if line != last:
+                        print(line, flush=True)
+                        last = line
+        except OSError:
+            pass
+        print(json.dumps({"connected": False}), flush=True)
+        time.sleep(5)
 
 
 def selftest():
-    """Parse packets captured from AirPods Pro (A3048), no Bluetooth needed."""
+    """Parse packets captured from AirPods Pro (A3047), no Bluetooth needed."""
     state = {"battery": {}, "mode": None}
     parse(bytes.fromhex("0400040004000302015e020104015f02010801000401"), state)
     assert state["battery"] == {"right": 94, "left": 95, "case": None}, state
     parse(bytes.fromhex("0400040009000d04000000"), state)
     assert state["mode"] == "adaptive", state
+    parse(bytes.fromhex("040004001d0002df000400" + b"AirPods Pro".hex()
+                        + "00" + b"A3047".hex() + "00" + b"Apple Inc.".hex()), state)
+    assert state["name"] == "AirPods Pro" and state["model"] == "A3047", state
     parse(bytes.fromhex("04000400080002000100"), state)  # unknown opcode
     print("ok")
 
@@ -126,22 +190,14 @@ def main():
     if command == "selftest":
         return selftest()
 
-    address = connected_address()
-    if not address:
-        if command == "status":
-            print(json.dumps({"connected": False}))
-            return
-        sys.exit("airpods: no AirPods connected")
+    if command == "watch":
+        return watch()
 
-    if command == "status":
-        print(json.dumps(status(address)))
-    elif command == "set":
-        mode = sys.argv[2] if len(sys.argv) > 2 else ""
-        if mode not in MODES:
-            sys.exit("airpods: set needs one of %s" % ", ".join(MODES))
-        set_mode(address, mode)
-    else:
-        sys.exit(__doc__ or "airpods: status | set <mode> | selftest")
+    if command != "status":
+        sys.exit("airpods: watch | status | selftest")
+
+    address = connected_address()
+    print(json.dumps(status(address) if address else {"connected": False}))
 
 
 if __name__ == "__main__":

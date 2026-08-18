@@ -3,7 +3,7 @@
 AirPods noise control and battery in the [Omarchy](https://omarchy.org/) bar.
 
 Standard Bluetooth profiles carry audio and the media keys, but they do not
-carry noise control mode, per-pod battery, or in-ear status. Apple sends these
+carry noise control mode or per-pod battery. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
 protocol directly.
 
@@ -11,9 +11,10 @@ protocol directly.
 
 The panel shows:
 
+- The device name and the model number
 - The battery level of each pod and of the case
-- The current noise control mode
-- Buttons for Off, Transparency, Adaptive, and ANC
+- Buttons for Off, Transparency, Adaptive, and ANC, with the current mode
+  selected
 
 The bar shows a headphone icon with the battery level of the lowest pod. The
 icon is dim when no AirPods are connected.
@@ -55,22 +56,28 @@ awareness, and hearing aid settings. This plugin does less, from the bar.
 The backend works on its own:
 
 ```bash
+~/.config/omarchy/plugins/soup.airpods/bin/airpods watch
 ~/.config/omarchy/plugins/soup.airpods/bin/airpods status
-~/.config/omarchy/plugins/soup.airpods/bin/airpods set transparency
 ~/.config/omarchy/plugins/soup.airpods/bin/airpods selftest
 ```
 
-`status` prints JSON:
+`status` prints one JSON line and exits. `watch` holds the channel open and
+prints a line for each change, which is what the panel runs:
 
 ```json
-{"connected": true, "address": "…", "mode": "adaptive",
- "battery": {"left": 90, "right": 85, "case": null}}
+{"connected": true, "address": "…", "name": "AirPods Pro", "model": "A3047",
+ "mode": "adaptive", "battery": {"left": 90, "right": 85, "case": null}}
 ```
+
+The AirPods report the mode and the model one time for each Bluetooth
+connection, to the client that holds the channel at that moment. A client
+that connects later reads almost nothing. While the panel runs, `status`
+therefore returns nulls, and it is useful only on a machine where the panel
+is not running. `watch` also takes mode names on stdin, because a write must
+go out on the channel that the AirPods are listening to.
 
 A `null` battery level means the component did not report one, which is normal
 for the case while the pods are in your ears.
-
-To bind a mode to a key, call `set` from your Hyprland config.
 
 ## Settings
 
@@ -78,15 +85,11 @@ Set these in `~/.config/omarchy/shell.json`, in the widget's entry:
 
 | Key | Default | What it does |
 |---|---|---|
-| `refreshIntervalSec` | `60` | Seconds between reads while the panel is closed |
 | `showBattery` | `true` | Show the battery percent next to the bar icon |
-
-Each read opens a short Bluetooth channel, so a small interval costs more
-radio time. The panel polls every 10 seconds while it is open.
 
 ## Tested with
 
-AirPods Pro (model A3048) on Omarchy 4, BlueZ 5.87. Other AirPods models use
+AirPods Pro (model A3047) on Omarchy 4, BlueZ 5.87. Other AirPods models use
 the same protocol, but they are not tested. Reports are welcome.
 
 ## Development
@@ -101,8 +104,10 @@ omarchy restart shell
 ## How it works
 
 `bin/airpods` connects to L2CAP PSM `0x1001`, sends the AAP handshake, then
-asks for the feature flags and the notification stream. The AirPods answer with
-battery, ear, and mode packets. Writing a mode is one control command packet.
+asks for the feature flags and the notification stream. The AirPods answer
+with metadata, battery, and mode packets. Writing a mode is one control
+command packet on the same channel, which is why `watch` reads mode names
+from stdin.
 
 The packet format was worked out by the LibrePods project. This plugin
 implements a small part of it.
