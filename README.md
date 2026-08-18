@@ -21,13 +21,21 @@ The panel shows:
   selected
 
 The bar shows an AirPods icon with the battery level of the lowest pod. The
-icon is dim when no AirPods are connected.
+widget leaves the bar while no AirPods are connected, the way the microphone
+and media widgets do. Connecting is BlueZ's work, not the panel's.
 
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/s0up4200/omarchy-airpods.git
 omarchy plugin enable soup.airpods
+```
+
+To put the widget somewhere else on the bar, give `omarchy bar move` a
+placement:
+
+```bash
+omarchy bar move soup.airpods --section right --after omarchy.clock
 ```
 
 Then tell BlueZ to identify itself as an Apple device, or the AirPods refuse
@@ -84,11 +92,27 @@ A `null` battery level means the component did not report one, and the panel
 shows `—`. The case does this while the pods are in your ears. It also does it
 when you put one pod in the case, because that disconnects the other pod.
 
+## Interactions
+
+- Bar icon: a click of any button toggles the panel.
+- Panel: Tab and Shift+Tab move to the neighboring bar panel, Esc closes. The
+  mode buttons and the switches are mouse-only.
+- IPC: `omarchy-shell soup.airpods <open|close|show|hide|toggle>`. This also
+  works while the AirPods are away and the widget is off the bar, which is
+  how you reach the settings then.
+
 ## Settings
 
 The panel has a Settings section with a switch for each of these. A switch
-writes to the widget's entry in `~/.config/omarchy/shell.json`, so you can
-also set them by hand:
+writes to the widget's entry in `~/.config/omarchy/shell.json`. The same keys
+take a value from the command line:
+
+```bash
+omarchy bar set soup.airpods showBattery false --json
+```
+
+Booleans need `--json`. Without it the value is stored as a string, which the
+widget reads as off whichever value you type.
 
 | Key | Default | What it does |
 |---|---|---|

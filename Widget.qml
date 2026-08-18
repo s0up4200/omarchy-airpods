@@ -58,8 +58,7 @@ Panel {
     return levels.length ? Math.min.apply(null, levels) : -1
   }
 
-  readonly property bool showsPercent: showBattery && connected
-    && lowestBattery >= 0 && !button.vertical
+  readonly property bool showsPercent: showBattery && lowestBattery >= 0 && !button.vertical
 
   function batteryText(component) {
     var level = battery ? battery[component] : undefined
@@ -178,6 +177,11 @@ Panel {
     }
   }
 
+  // Bar.qml collapses a slot whose item is invisible, so the widget leaves the
+  // bar with the pods, as the Agents panel does when it finds no usage. IPC
+  // still opens the panel, which is how the settings stay reachable.
+  visible: connected
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -191,9 +195,7 @@ Panel {
     hasVisualContent: true
     fixedWidth: vertical ? -1 : barContent.implicitWidth + scaledHorizontalMargin * 2
     fixedHeight: vertical ? Style.bar.iconSlot : -1
-    tooltipText: root.connected
-      ? (root.deviceName || "AirPods")
-      : "AirPods disconnected"
+    tooltipText: root.deviceName || "AirPods"
     onPressed: function(b) { root.toggle() }
 
     Row {
@@ -203,7 +205,7 @@ Panel {
 
       AirPodsIcon {
         iconSize: Style.bar.iconFont
-        color: root.connected ? root.barForeground : Qt.darker(root.barForeground, 1.55)
+        color: root.barForeground
         anchors.verticalCenter: parent.verticalCenter
       }
 
