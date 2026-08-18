@@ -36,6 +36,7 @@ Panel {
   property string deviceName: ""
   property string model: ""
   property var battery: ({})
+  property var charging: ({})
   // null until the device reports it, which is also what an unsupported
   // model looks like. Either way the row is dim and does nothing.
   property var conversationAwareness: null
@@ -87,7 +88,9 @@ Panel {
 
   function batteryText(component) {
     var level = battery ? battery[component] : undefined
-    return (level === undefined || level === null) ? "—" : level + "%"
+    if (level === undefined || level === null) return "—"
+    // A bolt beside the number, the way the power widget marks the wall.
+    return charging[component] ? level + "% ⚡" : level + "%"
   }
 
   function applyStatus(text) {
@@ -104,6 +107,7 @@ Panel {
     deviceName = connected ? (data.name || "") : ""
     model = connected ? (data.model || "") : ""
     battery = connected && data.battery ? data.battery : ({})
+    charging = connected && data.charging ? data.charging : ({})
     conversationAwareness = connected && data.ca !== undefined ? data.ca : null
     oneBudANC = connected && data.onebud !== undefined ? data.onebud : null
     adaptiveLevel = connected && data.adaptive_level !== undefined ? data.adaptive_level : null

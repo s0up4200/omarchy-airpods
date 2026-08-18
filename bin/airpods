@@ -38,6 +38,8 @@ FEATURE_FLAGS = HEADER + bytes([0x4D, 0x00, 0xFF] + [0x00] * 7)
 MODES = {"off": 0x01, "anc": 0x02, "transparency": 0x03, "adaptive": 0x04}
 MODE_NAMES = {v: k for k, v in MODES.items()}
 COMPONENTS = {0x01: "headphone", 0x02: "right", 0x04: "left", 0x08: "case"}
+# Battery status byte: 0x01 charging, 0x02 idle, 0x04 absent.
+STATUS_CHARGING, STATUS_ABSENT = 0x01, 0x04
 
 LISTENING_MODE = 0x0D  # control command identifier
 CONVERSATION_AWARENESS = 0x28
@@ -77,10 +79,12 @@ def parse(packet, state):
         for i in range(count):
             component, _, level, status = payload[3 + i * 5:7 + i * 5]
             name = COMPONENTS.get(component)
-            if name:
-                # A disconnected component reports level 0, which is not a
-                # reading. Report it as unknown rather than as an empty pod.
-                state["battery"][name] = None if status == 0x04 else level
+            if not name:
+                continue
+            # A disconnected component reports level 0 or 0xff, which is not
+            # a reading. Report it as unknown rather than as an empty pod.
+            state["battery"][name] = None if status == STATUS_ABSENT else level
+            state["charging"][name] = status == STATUS_CHARGING
 
     elif opcode == OP_EAR and len(payload) >= 4:
         state["ear"] = [EAR_STATES.get(payload[2]), EAR_STATES.get(payload[3])]
@@ -147,8 +151,8 @@ def watch():
                 sock.send(NOTIFICATIONS)
                 sock.settimeout(None)
                 state = {"connected": True, "address": address, "name": None,
-                         "model": None, "mode": None, "battery": {}, "ear": None,
-                         "ca": None, "onebud": None, "adaptive_level": None}
+                         "model": None, "mode": None, "battery": {}, "charging": {},
+                         "ear": None, "ca": None, "onebud": None, "adaptive_level": None}
                 last = ""
                 while True:
                     # Read the file descriptor, not sys.stdin: a buffered read
@@ -198,10 +202,15 @@ def capture():
 
 def selftest():
     """Parse packets captured from AirPods Pro (A3047), no Bluetooth needed."""
-    state = {"battery": {}, "mode": None, "ear": None, "ca": None, "onebud": None,
-             "adaptive_level": None}
+    state = {"battery": {}, "charging": {}, "mode": None, "ear": None, "ca": None,
+             "onebud": None, "adaptive_level": None}
     parse(bytes.fromhex("0400040004000302015e020104015f02010801000401"), state)
     assert state["battery"] == {"right": 94, "left": 95, "case": None}, state
+    # Right pod in the case and charging, left pod out, case absent. An
+    # absent case reports level 0xff, which is not a reading either.
+    parse(bytes.fromhex("04000400040003040164020102016401010801ff0401"), state)
+    assert state["charging"] == {"right": True, "left": False, "case": False}, state
+    assert state["battery"] == {"right": 100, "left": 100, "case": None}, state
     parse(bytes.fromhex("0400040009000d04000000"), state)
     assert state["mode"] == "adaptive", state
     parse(bytes.fromhex("0400040009002801000000"), state)
