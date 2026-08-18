@@ -13,8 +13,12 @@
 # channel open and reports every change, and it takes mode names on stdin
 # so that writes go out on that same channel.
 #
+# The protocol constants come from the reverse-engineering work of the
+# LibrePods project by Kavish Devar. No code is shared with it.
+#
 # Usage:
 #   airpods watch                               a JSON line per change
+#   airpods capture                             raw packets as hex, for fixtures
 #   airpods selftest                            parse check, no Bluetooth
 import json
 import os
@@ -146,6 +150,24 @@ def watch():
         time.sleep(5)
 
 
+def capture():
+    """Print every packet as hex. For building selftest fixtures."""
+    address = connected_address()
+    if not address:
+        sys.exit("airpods: no AirPods connected")
+    with open_channel(address) as sock:
+        time.sleep(0.3)
+        sock.send(FEATURE_FLAGS)
+        time.sleep(0.3)
+        sock.send(NOTIFICATIONS)
+        sock.settimeout(None)
+        while True:
+            packet = sock.recv(1024)
+            if not packet:
+                return
+            print(packet.hex(), flush=True)
+
+
 def selftest():
     """Parse packets captured from AirPods Pro (A3047), no Bluetooth needed."""
     state = {"battery": {}, "mode": None, "ear": None}
@@ -168,8 +190,11 @@ def main():
     if command == "selftest":
         return selftest()
 
+    if command == "capture":
+        return capture()
+
     if command != "watch":
-        sys.exit("airpods: watch | selftest")
+        sys.exit("airpods: watch | capture | selftest")
 
     watch()
 
