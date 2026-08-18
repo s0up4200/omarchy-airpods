@@ -6,7 +6,8 @@ Standard Bluetooth profiles carry audio and the media keys, but they do not
 carry noise control mode, per-pod battery, or in-ear status. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
 protocol directly: the whole backend is one Python file on the standard
-library, with no daemon and no companion app.
+library. Nothing to compile, no systemd unit of its own, no companion app,
+and one license for the whole repository.
 
 ![the panel](preview.png)
 
@@ -29,6 +30,9 @@ The panel shows:
 The bar shows an AirPods icon with the battery level of the lowest pod. The
 widget leaves the bar while no AirPods are connected, the way the microphone
 and media widgets do. Connecting is BlueZ's work, not the panel's.
+
+Volume and output selection stay in the stock Audio panel, which already
+does them well. This panel only adds what the stock panels cannot see.
 
 ## Install
 
@@ -55,6 +59,12 @@ Restart Bluetooth and reconnect the AirPods:
 
 ```bash
 sudo systemctl restart bluetooth
+```
+
+Removal is one command; only the `DeviceID` line above stays behind:
+
+```bash
+omarchy plugin remove soup.airpods
 ```
 
 ## Do not run LibrePods at the same time
