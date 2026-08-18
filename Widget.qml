@@ -37,6 +37,21 @@ Panel {
   // model looks like. Either way the row is dim and does nothing.
   property var conversationAwareness: null
   property var oneBudANC: null
+  property var adaptiveLevel: null
+
+  // Apple draws a slider. Three chips reuse the row idiom the modes already
+  // have, and the difference between 40 and 45 is not audible.
+  readonly property var adaptiveOptions: [
+    { value: 25, label: "Less" },
+    { value: 50, label: "Medium" },
+    { value: 75, label: "More" }
+  ]
+
+  // The device reports any value in 0-100; the nearest chip lights, so a
+  // level set from a phone still reads sensibly. A null level rounds to 25,
+  // but the chip row is hidden then, so nothing shows it.
+  readonly property int nearestAdaptive:
+    Math.min(75, Math.max(25, Math.round(adaptiveLevel / 25) * 25))
   property bool inEar: true
   // PipeWire names a Bluetooth sink after the MAC address, with underscores.
   readonly property bool isOutput: {
@@ -85,6 +100,7 @@ Panel {
     battery = connected && data.battery ? data.battery : ({})
     conversationAwareness = connected && data.ca !== undefined ? data.ca : null
     oneBudANC = connected && data.onebud !== undefined ? data.onebud : null
+    adaptiveLevel = connected && data.adaptive_level !== undefined ? data.adaptive_level : null
 
     var ear = connected ? data.ear : null
     if (ear) {
@@ -137,6 +153,11 @@ Panel {
     aap.write(key + (value === true ? " off\n" : " on\n"))
   }
 
+  function setAdaptive(value) {
+    if (!connected) return
+    aap.write("adaptive " + value + "\n")
+  }
+
   function setMode(value) {
     if (!connected) return
     // Paint the new mode straight away; the next line from the watcher confirms it.
@@ -160,6 +181,16 @@ Panel {
     id: restart
     interval: 2000
     onTriggered: aap.running = true
+  }
+
+  // One chip in a selectable row: the mode row, the adaptive row. Text,
+  // selection, and the click stay at the call site.
+  component Chip: Button {
+    required property var modelData
+    bordered: true
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    fontSize: Style.font.bodySmall
   }
 
   component SettingRow: Item {
@@ -339,18 +370,29 @@ Panel {
             Repeater {
               model: root.modeOptions
 
-              Button {
-                required property var modelData
-
+              Chip {
                 text: modelData.label
                 // `selected` is the whole state model. A cursor flag as well
                 // would latch on and light a second chip.
                 selected: modelData.value === root.mode
-                bordered: true
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.bodySmall
                 onClicked: root.setMode(modelData.value)
+              }
+            }
+          }
+
+          Row {
+            spacing: Style.spacing.md
+            // The level only means anything while Adaptive is the live mode,
+            // which is when Apple shows it too.
+            visible: root.mode === "adaptive" && root.adaptiveLevel !== null
+
+            Repeater {
+              model: root.adaptiveOptions
+
+              Chip {
+                text: modelData.label
+                selected: root.nearestAdaptive === modelData.value
+                onClicked: root.setAdaptive(modelData.value)
               }
             }
           }
