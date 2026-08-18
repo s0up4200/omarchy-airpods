@@ -123,16 +123,24 @@ def control(identifier, value):
     return HEADER + bytes([0x09, 0x00, identifier, value, 0, 0, 0])
 
 
-def send_command(sock, key, value):
-    """Apply one `key value` command. Unknown keys and values are ignored."""
+def send_command(sock, state, key, value):
+    """Apply one `key value` command. Unknown keys and values are ignored.
+
+    The AirPods never echo control writes back, so record the value here;
+    the next connection's dump corrects drift.
+    """
     if key == "mode" and value in MODES:
         sock.send(control(LISTENING_MODE, MODES[value]))
+        state["mode"] = value
     elif key == "ca" and value in ("on", "off"):
         sock.send(control(CONVERSATION_AWARENESS, 0x01 if value == "on" else 0x02))
+        state["ca"] = value == "on"
     elif key == "onebud" and value in ("on", "off"):
         sock.send(control(ONE_BUD_ANC, 0x01 if value == "on" else 0x02))
+        state["onebud"] = value == "on"
     elif key == "adaptive" and value.isdigit() and int(value) <= 100:
         sock.send(control(ADAPTIVE_LEVEL, int(value)))
+        state["adaptive_level"] = int(value)
 
 
 def watch():
@@ -171,7 +179,7 @@ def watch():
                             return  # the caller went away
                         words = command.decode().split()
                         for key, value in zip(words[::2], words[1::2]):
-                            send_command(sock, key, value)
+                            send_command(sock, state, key, value)
                     line = json.dumps(state)
                     if line != last:
                         print(line, flush=True)
@@ -227,6 +235,15 @@ def selftest():
     parse(bytes.fromhex("0400040006000100"), state)
     assert state["ear"] == ["out_of_ear", "in_ear"], state
     parse(bytes.fromhex("04000400080002000100"), state)  # unknown opcode
+
+    sent = []
+    sock = type("Sock", (), {"send": sent.append})()
+    send_command(sock, state, "ca", "on")
+    assert state["ca"] is True and sent[-1] == bytes.fromhex("0400040009002801000000"), (state, sent)
+    send_command(sock, state, "adaptive", "25")
+    assert state["adaptive_level"] == 25, state
+    send_command(sock, state, "bogus", "on")
+    assert len(sent) == 2, sent
     print("ok")
 
 
