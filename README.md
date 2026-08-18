@@ -5,7 +5,8 @@ AirPods noise control and battery in the [Omarchy](https://omarchy.org/) bar.
 Standard Bluetooth profiles carry audio and the media keys, but they do not
 carry noise control mode, per-pod battery, or in-ear status. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
-protocol directly.
+protocol directly: the whole backend is one Python file on the standard
+library, with no daemon and no companion app.
 
 ![the panel](preview.png)
 
@@ -55,9 +56,6 @@ Restart Bluetooth and reconnect the AirPods:
 ```bash
 sudo systemctl restart bluetooth
 ```
-
-There are no other dependencies. The backend is one Python script that uses
-the standard library only.
 
 ## Do not run LibrePods at the same time
 
