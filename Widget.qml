@@ -90,7 +90,8 @@ Panel {
     var level = battery ? battery[component] : undefined
     if (level === undefined || level === null) return "—"
     // A bolt beside the number, the way the power widget marks the wall.
-    return charging[component] ? level + "% ⚡" : level + "%"
+    // The Nerd Font glyph follows the text color; the emoji stays yellow.
+    return charging[component] ? level + "% 󱐋" : level + "%"
   }
 
   function applyStatus(text) {
