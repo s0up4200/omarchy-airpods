@@ -7,7 +7,7 @@ carry noise control mode, per-pod battery, or in-ear status. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
 protocol directly.
 
-![the panel](docs/panel.png)
+![the panel](preview.png)
 
 The plugin pauses the music when you take a pod out, and continues it when
 the pod goes back in. It acts only on a player that it paused itself, and
