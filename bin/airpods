@@ -40,6 +40,10 @@ MODE_NAMES = {v: k for k, v in MODES.items()}
 COMPONENTS = {0x01: "headphone", 0x02: "right", 0x04: "left", 0x08: "case"}
 
 LISTENING_MODE = 0x0D  # control command identifier
+CONVERSATION_AWARENESS = 0x28
+# The device answers 0x01 for on and 0x02 for off on every toggle identifier.
+TOGGLE_STATES = {0x01: True, 0x02: False}
+TOGGLES = {CONVERSATION_AWARENESS: "ca"}
 OP_BATTERY, OP_EAR, OP_CONTROL, OP_INFO = 0x04, 0x06, 0x09, 0x1D
 EAR_STATES = {0x00: "in_ear", 0x01: "out_of_ear", 0x02: "in_case", 0x03: "disconnected"}
 
@@ -91,8 +95,11 @@ def parse(packet, state):
             state["model"] = fields[1]
 
     elif opcode == OP_CONTROL and len(payload) >= 7:
-        if payload[2] == LISTENING_MODE:
+        identifier = payload[2]
+        if identifier == LISTENING_MODE:
             state["mode"] = MODE_NAMES.get(payload[3])
+        elif identifier in TOGGLES:
+            state[TOGGLES[identifier]] = TOGGLE_STATES.get(payload[3])
 
 
 def open_channel(address):
@@ -112,6 +119,8 @@ def send_command(sock, key, value):
     """Apply one `key value` command. Unknown keys and values are ignored."""
     if key == "mode" and value in MODES:
         sock.send(control(LISTENING_MODE, MODES[value]))
+    elif key == "ca" and value in ("on", "off"):
+        sock.send(control(CONVERSATION_AWARENESS, 0x01 if value == "on" else 0x02))
 
 
 def watch():
@@ -130,7 +139,8 @@ def watch():
                 sock.send(NOTIFICATIONS)
                 sock.settimeout(None)
                 state = {"connected": True, "address": address, "name": None,
-                         "model": None, "mode": None, "battery": {}, "ear": None}
+                         "model": None, "mode": None, "battery": {}, "ear": None,
+                         "ca": None}
                 last = ""
                 while True:
                     # Read the file descriptor, not sys.stdin: a buffered read
@@ -180,11 +190,15 @@ def capture():
 
 def selftest():
     """Parse packets captured from AirPods Pro (A3047), no Bluetooth needed."""
-    state = {"battery": {}, "mode": None, "ear": None}
+    state = {"battery": {}, "mode": None, "ear": None, "ca": None}
     parse(bytes.fromhex("0400040004000302015e020104015f02010801000401"), state)
     assert state["battery"] == {"right": 94, "left": 95, "case": None}, state
     parse(bytes.fromhex("0400040009000d04000000"), state)
     assert state["mode"] == "adaptive", state
+    parse(bytes.fromhex("0400040009002801000000"), state)
+    assert state["ca"] is True, state
+    parse(bytes.fromhex("0400040009002802000000"), state)
+    assert state["ca"] is False, state
     parse(bytes.fromhex("040004001d0002df000400" + b"AirPods Pro".hex()
                         + "00" + b"A3047".hex() + "00" + b"Apple Inc.".hex()), state)
     assert state["name"] == "AirPods Pro" and state["model"] == "A3047", state

@@ -33,6 +33,9 @@ Panel {
   property string deviceName: ""
   property string model: ""
   property var battery: ({})
+  // null until the device reports it, which is also what an unsupported
+  // model looks like. Either way the row is dim and does nothing.
+  property var conversationAwareness: null
   property bool inEar: true
   // PipeWire names a Bluetooth sink after the MAC address, with underscores.
   readonly property bool isOutput: {
@@ -79,6 +82,7 @@ Panel {
     deviceName = connected ? (data.name || "") : ""
     model = connected ? (data.model || "") : ""
     battery = connected && data.battery ? data.battery : ({})
+    conversationAwareness = connected && data.ca !== undefined ? data.ca : null
 
     var ear = connected ? data.ear : null
     if (ear) {
@@ -124,6 +128,13 @@ Panel {
     if (bar && bar.shell) bar.shell.updateEntryInline(moduleName, settings)
   }
 
+  function setToggle(key, value) {
+    if (!connected || value !== true && value !== false) return
+    // No optimistic paint: the device echoes the new value on the same
+    // channel, and a toggle that lies is worse than one that waits.
+    aap.write(key + (value === true ? " off\n" : " on\n"))
+  }
+
   function setMode(value) {
     if (!connected) return
     // Paint the new mode straight away; the next line from the watcher confirms it.
@@ -156,6 +167,7 @@ Panel {
 
     width: parent ? parent.width : 0
     implicitHeight: Math.max(rowLabel.implicitHeight, rowSwitch.implicitHeight)
+    opacity: enabled ? 1.0 : 0.4
 
     Text {
       id: rowLabel
@@ -339,6 +351,24 @@ Panel {
                 onClicked: root.setMode(modelData.value)
               }
             }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          visible: root.connected
+
+          PanelSectionHeader {
+            width: parent.width
+            text: "Controls"
+          }
+
+          SettingRow {
+            label: "Conversation Awareness"
+            checked: root.conversationAwareness === true
+            enabled: root.conversationAwareness !== null
+            onToggled: root.setToggle("ca", root.conversationAwareness)
           }
         }
 
