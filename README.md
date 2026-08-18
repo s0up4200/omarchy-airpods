@@ -16,7 +16,7 @@ only while the AirPods are the current audio output.
 The panel shows:
 
 - The device name and the model number
-- The battery level of each pod and of the case
+- The battery level of each pod, and of the case when it reports one
 - Buttons for Off, Transparency, Adaptive, and ANC, with the current mode
   selected
 
@@ -82,8 +82,9 @@ therefore returns nulls, and it is useful only on a machine where the panel
 is not running. `watch` also takes mode names on stdin, because a write must
 go out on the channel that the AirPods are listening to.
 
-A `null` battery level means the component did not report one, which is normal
-for the case while the pods are in your ears.
+A `null` battery level means the component did not report one, and the panel
+shows `—`. The case does this while the pods are in your ears. It also does it
+when you put one pod in the case, because that disconnects the other pod.
 
 ## Settings
 
