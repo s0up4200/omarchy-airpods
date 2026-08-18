@@ -18,7 +18,7 @@ The panel shows:
 - The device name and the model number
 - The battery level of each pod, and of the case when it reports one
 - Buttons for Off, Transparency, Adaptive, and ANC, with the current mode
-  selected
+  selected. The Off mode is absent on AirPods Pro 3, which has no such mode.
 
 The bar shows an AirPods icon with the battery level of the lowest pod. The
 widget leaves the bar while no AirPods are connected, the way the microphone
