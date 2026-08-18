@@ -128,7 +128,7 @@ Panel {
     if (!connected) return
     // Paint the new mode straight away; the next line from the watcher confirms it.
     mode = value
-    aap.write(value + "\n")
+    aap.write("mode " + value + "\n")
   }
 
   Process {

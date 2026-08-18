@@ -10,8 +10,8 @@
 # The AirPods send the mode and the model once per Bluetooth connection, to
 # whichever client is on the channel at that moment. A client that connects
 # later gets battery levels and nothing else. `watch` therefore holds one
-# channel open and reports every change, and it takes mode names on stdin
-# so that writes go out on that same channel.
+# channel open and reports every change, and it takes `key value` commands
+# on stdin (`mode anc`) so that writes go out on that same channel.
 #
 # The protocol constants come from the reverse-engineering work of the
 # LibrePods project by Kavish Devar. No code is shared with it.
@@ -103,6 +103,17 @@ def open_channel(address):
     return sock
 
 
+def control(identifier, value):
+    """One AAP control packet: header, identifier, value, padding."""
+    return HEADER + bytes([0x09, 0x00, identifier, value, 0, 0, 0])
+
+
+def send_command(sock, key, value):
+    """Apply one `key value` command. Unknown keys and values are ignored."""
+    if key == "mode" and value in MODES:
+        sock.send(control(LISTENING_MODE, MODES[value]))
+
+
 def watch():
     """Hold the channel open and print a JSON line whenever the state changes."""
     while True:
@@ -136,10 +147,9 @@ def watch():
                         command = os.read(0, 4096)
                         if not command:
                             return  # the caller went away
-                        for name in command.decode().split():
-                            if name in MODES:
-                                sock.send(HEADER + bytes([0x09, 0x00, LISTENING_MODE,
-                                                          MODES[name], 0, 0, 0]))
+                        words = command.decode().split()
+                        for key, value in zip(words[::2], words[1::2]):
+                            send_command(sock, key, value)
                     line = json.dumps(state)
                     if line != last:
                         print(line, flush=True)
