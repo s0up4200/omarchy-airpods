@@ -20,6 +20,10 @@ Panel {
   // checkout path without anything on PATH.
   readonly property string script: Qt.resolvedUrl("bin/airpods").toString().replace("file://", "")
 
+  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color dim: Qt.darker(foreground, 1.55)
+  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+
   readonly property bool showBattery: setting("showBattery", true) === true
   readonly property bool autoPause: setting("autoPause", true) === true
 
@@ -157,8 +161,8 @@ Panel {
     Text {
       id: rowLabel
       text: parent.label
-      color: root.bar.foreground
-      font.family: root.bar.fontFamily
+      color: root.foreground
+      font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -167,7 +171,7 @@ Panel {
     ToggleSwitch {
       id: rowSwitch
       checked: parent.checked
-      foreground: root.bar.foreground
+      foreground: root.foreground
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       onToggled: parent.toggled()
@@ -199,7 +203,7 @@ Panel {
 
       AirPodsIcon {
         iconSize: Style.bar.iconFont
-        color: root.connected ? root.barForeground : Qt.darker(root.barForeground, 1.6)
+        color: root.connected ? root.barForeground : Qt.darker(root.barForeground, 1.55)
         anchors.verticalCenter: parent.verticalCenter
       }
 
@@ -207,7 +211,7 @@ Panel {
         visible: root.showsPercent
         text: root.lowestBattery + "%"
         color: root.barForeground
-        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.family: root.fontFamily
         font.pixelSize: Style.bar.iconFont
         renderType: Text.NativeRendering
         anchors.verticalCenter: parent.verticalCenter
@@ -246,13 +250,13 @@ Panel {
           width: parent.width
           title: root.deviceName || "AirPods"
           meta: root.connected ? root.model : "Not connected"
-          foreground: root.bar.foreground
-          fontFamily: root.bar.fontFamily
+          foreground: root.foreground
+          fontFamily: root.fontFamily
           iconOpacity: root.connected ? 1.0 : 0.5
           iconComponent: Component {
             AirPodsIcon {
               iconSize: Style.font.display
-              color: root.bar.foreground
+              color: root.foreground
             }
           }
         }
@@ -286,15 +290,15 @@ Panel {
 
                 Text {
                   text: modelData.label
-                  color: Qt.darker(root.bar.foreground, 1.5)
-                  font.family: root.bar.fontFamily
+                  color: root.dim
+                  font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                 }
 
                 Text {
                   text: root.batteryText(modelData.key)
-                  color: root.bar.foreground
-                  font.family: root.bar.fontFamily
+                  color: root.foreground
+                  font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                 }
               }
@@ -327,8 +331,8 @@ Panel {
                 // would latch on and light a second chip.
                 selected: modelData.value === root.mode
                 bordered: true
-                foreground: root.bar.foreground
-                fontFamily: root.bar.fontFamily
+                foreground: root.foreground
+                fontFamily: root.fontFamily
                 fontSize: Style.font.bodySmall
                 onClicked: root.setMode(modelData.value)
               }

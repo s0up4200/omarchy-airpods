@@ -1,5 +1,4 @@
 #!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Read and control AirPods over Apple's AAP protocol: noise control mode,
 # per-pod battery, in-ear status, and the model. Standard Bluetooth profiles
 # do not carry any of this, so it speaks the vendor protocol on L2CAP PSM
@@ -16,11 +15,7 @@
 #
 # Usage:
 #   airpods watch                               a JSON line per change
-#   airpods status                              one JSON line, then exit
 #   airpods selftest                            parse check, no Bluetooth
-#
-# `status` is for a machine with no panel running. While the panel holds the
-# channel, a second client reads almost nothing.
 import json
 import os
 import select
@@ -96,36 +91,12 @@ def parse(packet, state):
             state["mode"] = MODE_NAMES.get(payload[3])
 
 
-def open_channel(address, timeout=5):
+def open_channel(address):
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
-    sock.settimeout(timeout)
+    sock.settimeout(5)
     sock.connect((address, PSM))
     sock.send(HANDSHAKE)
     return sock
-
-
-def status(address):
-    state = {"connected": True, "address": address, "name": None, "model": None,
-             "mode": None, "battery": {}, "ear": None}
-    sock = open_channel(address)
-    # The AirPods drop packets that arrive too soon after the handshake, so
-    # keep the same spacing LibrePods uses.
-    time.sleep(0.3)
-    sock.send(FEATURE_FLAGS)
-    time.sleep(0.3)
-    sock.send(NOTIFICATIONS)
-    sock.settimeout(2)
-    # The AirPods push their state as a burst of notifications. Stop as soon
-    # as mode and battery are in, so a good read does not wait out the timeout.
-    while True:
-        try:
-            parse(sock.recv(1024), state)
-        except socket.timeout:
-            break
-        if state["mode"] and state["battery"]:
-            break
-    sock.close()
-    return state
 
 
 def watch():
@@ -192,19 +163,15 @@ def selftest():
 
 
 def main():
-    command = sys.argv[1] if len(sys.argv) > 1 else "status"
+    command = sys.argv[1] if len(sys.argv) > 1 else "watch"
 
     if command == "selftest":
         return selftest()
 
-    if command == "watch":
-        return watch()
+    if command != "watch":
+        sys.exit("airpods: watch | selftest")
 
-    if command != "status":
-        sys.exit("airpods: watch | status | selftest")
-
-    address = connected_address()
-    print(json.dumps(status(address) if address else {"connected": False}))
+    watch()
 
 
 if __name__ == "__main__":

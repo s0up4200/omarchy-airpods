@@ -62,12 +62,11 @@ The backend works on its own:
 
 ```bash
 ~/.config/omarchy/plugins/soup.airpods/bin/airpods watch
-~/.config/omarchy/plugins/soup.airpods/bin/airpods status
 ~/.config/omarchy/plugins/soup.airpods/bin/airpods selftest
 ```
 
-`status` prints one JSON line and exits. `watch` holds the channel open and
-prints a line for each change, which is what the panel runs:
+`watch` holds the channel open and prints a line for each change, which is
+what the panel runs:
 
 ```json
 {"connected": true, "address": "…", "name": "AirPods Pro", "model": "A3047",
@@ -77,9 +76,8 @@ prints a line for each change, which is what the panel runs:
 
 The AirPods report the mode and the model one time for each Bluetooth
 connection, to the client that holds the channel at that moment. A client
-that connects later reads almost nothing. While the panel runs, `status`
-therefore returns nulls, and it is useful only on a machine where the panel
-is not running. `watch` also takes mode names on stdin, because a write must
+that connects later reads almost nothing. This is why the panel keeps one
+`watch` open. `watch` also takes mode names on stdin, because a write must
 go out on the channel that the AirPods are listening to.
 
 A `null` battery level means the component did not report one, and the panel
@@ -99,8 +97,8 @@ also set them by hand:
 
 ## Tested with
 
-AirPods Pro (model A3047) on Omarchy 4, BlueZ 5.87. Other AirPods models use
-the same protocol, but they are not tested. Reports are welcome.
+AirPods Pro (models A3047 and A3048) on Omarchy 4, BlueZ 5.87. Other AirPods
+models use the same protocol, but they are not tested. Reports are welcome.
 
 ## Development
 

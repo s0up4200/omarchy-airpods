@@ -26,14 +26,12 @@
       {
         "key": "showBattery",
         "type": "boolean",
-        "label": "Show battery percent in the bar",
-        "defaultValue": true
+        "label": "Show battery percent in the bar"
       },
       {
         "key": "autoPause",
         "type": "boolean",
-        "label": "Pause the music when a pod comes out",
-        "defaultValue": true
+        "label": "Pause the music when a pod comes out"
       }
     ]
   }
