@@ -1,10 +1,12 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 import qs.Commons
 import qs.Ui
 
-// Bar widget for AirPods: headphone icon with the lowest pod's battery, and a
+// Bar widget for AirPods: the AirPods icon with the lowest pod's battery, and a
 // popup that switches noise control mode. All device work happens in bin/airpods,
 // which holds one AAP channel open and prints a JSON line per change. Mode
 // changes go back to it on stdin, because the AirPods obey only the client
@@ -19,12 +21,24 @@ Panel {
   readonly property string script: Qt.resolvedUrl("bin/airpods").toString().replace("file://", "")
 
   readonly property bool showBattery: setting("showBattery", true) === true
+  readonly property bool autoPause: setting("autoPause", true) === true
 
   property bool connected: false
+  property string address: ""
   property string mode: ""
   property string deviceName: ""
   property string model: ""
   property var battery: ({})
+  property bool inEar: true
+  // PipeWire names a Bluetooth sink after the MAC address, with underscores.
+  readonly property bool isOutput: {
+    var sink = Pipewire.defaultAudioSink
+    if (!sink || !address) return false
+    return String(sink.name || "").indexOf(address.replace(/:/g, "_")) >= 0
+  }
+  // Only a pod that we paused gets resumed, so a track the user stopped by
+  // hand stays stopped when the pods go back in.
+  property var pausedPlayer: null
 
   readonly property var modeOptions: [
     { value: "off", label: "Off" },
@@ -57,10 +71,54 @@ Panel {
       return
     }
     connected = data.connected === true
+    address = connected ? (data.address || "") : ""
     mode = connected ? (data.mode || "") : ""
     deviceName = connected ? (data.name || "") : ""
     model = connected ? (data.model || "") : ""
     battery = connected && data.battery ? data.battery : ({})
+
+    var ear = connected ? data.ear : null
+    if (ear) {
+      // A pod out of your ear stops the music, even when the other one is
+      // still in. A pod resting in the case does not: that is how you listen
+      // with one pod.
+      var wearing = ear.indexOf("out_of_ear") < 0 && ear.indexOf("in_ear") >= 0
+      if (wearing !== inEar) {
+        inEar = wearing
+        applyEarChange()
+      }
+    }
+  }
+
+  // Apple's rule: take one pod out and the sound stops, put it back and it
+  // continues. The ear packet arrives on the same stream as everything else.
+  function applyEarChange() {
+    // Pausing whenever a pod moves would also stop music that is playing on
+    // the speakers while the AirPods sit connected in a pocket.
+    if (!autoPause || !isOutput) return
+
+    if (!inEar) {
+      var players = Mpris.players ? Mpris.players.values : []
+      pausedPlayer = players.find(function(player) {
+        return player.isPlaying && player.canPause
+      }) || null
+      if (pausedPlayer) pausedPlayer.pause()
+      return
+    }
+
+    if (pausedPlayer) {
+      if (pausedPlayer.canPlay) pausedPlayer.play()
+      pausedPlayer = null
+    }
+  }
+
+  // Same persistence path the power widget uses for its percentage toggle:
+  // write the value into this widget's inline entry in shell.json.
+  function updateSetting(key, value) {
+    var patch = {}
+    patch[key] = value
+    settings = Object.assign({}, settings, patch)
+    if (bar && bar.shell) bar.shell.updateEntryInline(moduleName, settings)
   }
 
   function setMode(value) {
@@ -88,18 +146,73 @@ Panel {
     onTriggered: aap.running = true
   }
 
+  component SettingRow: Item {
+    property string label: ""
+    property bool checked: false
+    signal toggled()
+
+    width: parent ? parent.width : 0
+    implicitHeight: Math.max(rowLabel.implicitHeight, rowSwitch.implicitHeight)
+
+    Text {
+      id: rowLabel
+      text: parent.label
+      color: root.bar.foreground
+      font.family: root.bar.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+    }
+
+    ToggleSwitch {
+      id: rowSwitch
+      checked: parent.checked
+      foreground: root.bar.foreground
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      onToggled: parent.toggled()
+    }
+  }
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  BarIconButton {
+  // WidgetButton rather than BarIconButton: the icon slot of the latter holds
+  // a glyph or a drawn icon, never a drawn icon beside a label.
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.showsPercent ? "󰋋 " + root.lowestBattery + "%" : "󰋋"
-    slotSize: Style.bar.iconSlot * (root.showsPercent ? 2 : 1)
-    foreground: root.connected ? root.barForeground : Qt.darker(root.barForeground, 1.6)
-    tooltipText: root.connected ? "AirPods" : "AirPods disconnected"
+    labelVisible: false
+    hasVisualContent: true
+    fixedWidth: vertical ? -1 : barContent.implicitWidth + scaledHorizontalMargin * 2
+    fixedHeight: vertical ? Style.bar.iconSlot : -1
+    tooltipText: root.connected
+      ? (root.deviceName || "AirPods")
+      : "AirPods disconnected"
     onPressed: function(b) { root.toggle() }
+
+    Row {
+      id: barContent
+      anchors.centerIn: parent
+      spacing: Style.space(5)
+
+      AirPodsIcon {
+        iconSize: Style.bar.iconFont
+        color: root.connected ? root.barForeground : Qt.darker(root.barForeground, 1.6)
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        visible: root.showsPercent
+        text: root.lowestBattery + "%"
+        color: root.barForeground
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.bar.iconFont
+        renderType: Text.NativeRendering
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
   }
 
   KeyboardPanel {
@@ -137,11 +250,9 @@ Panel {
           fontFamily: root.bar.fontFamily
           iconOpacity: root.connected ? 1.0 : 0.5
           iconComponent: Component {
-            Text {
-              text: "󰋋"
+            AirPodsIcon {
+              iconSize: Style.font.display
               color: root.bar.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.display
             }
           }
         }
@@ -222,6 +333,28 @@ Panel {
                 onClicked: root.setMode(modelData.value)
               }
             }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          PanelSectionHeader {
+            width: parent.width
+            text: "Settings"
+          }
+
+          SettingRow {
+            label: "Pause when a pod comes out"
+            checked: root.autoPause
+            onToggled: root.updateSetting("autoPause", !root.autoPause)
+          }
+
+          SettingRow {
+            label: "Battery percent in the bar"
+            checked: root.showBattery
+            onToggled: root.updateSetting("showBattery", !root.showBattery)
           }
         }
       }

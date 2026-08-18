@@ -3,11 +3,15 @@
 AirPods noise control and battery in the [Omarchy](https://omarchy.org/) bar.
 
 Standard Bluetooth profiles carry audio and the media keys, but they do not
-carry noise control mode or per-pod battery. Apple sends these
+carry noise control mode, per-pod battery, or in-ear status. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
 protocol directly.
 
 ![the panel](docs/panel.png)
+
+The plugin pauses the music when you take a pod out, and continues it when
+the pod goes back in. It acts only on a player that it paused itself, and
+only while the AirPods are the current audio output.
 
 The panel shows:
 
@@ -16,7 +20,7 @@ The panel shows:
 - Buttons for Off, Transparency, Adaptive, and ANC, with the current mode
   selected
 
-The bar shows a headphone icon with the battery level of the lowest pod. The
+The bar shows an AirPods icon with the battery level of the lowest pod. The
 icon is dim when no AirPods are connected.
 
 ## Install
@@ -48,8 +52,9 @@ The AirPods accept one AAP client. If [LibrePods](https://github.com/librepods-o
 holds the channel, this plugin reads stale data and its commands are ignored.
 Use one or the other.
 
-LibrePods does more than this plugin: ear-detection auto-pause, conversational
-awareness, and hearing aid settings. This plugin does less, from the bar.
+LibrePods still does more: conversational awareness, hearing aid settings,
+head gestures, and renaming. This plugin gives you noise control, battery,
+and auto-pause from the bar.
 
 ## Command line
 
@@ -66,7 +71,8 @@ prints a line for each change, which is what the panel runs:
 
 ```json
 {"connected": true, "address": "…", "name": "AirPods Pro", "model": "A3047",
- "mode": "adaptive", "battery": {"left": 90, "right": 85, "case": null}}
+ "mode": "adaptive", "battery": {"left": 90, "right": 85, "case": null},
+ "ear": ["in_ear", "in_ear"]}
 ```
 
 The AirPods report the mode and the model one time for each Bluetooth
@@ -81,11 +87,14 @@ for the case while the pods are in your ears.
 
 ## Settings
 
-Set these in `~/.config/omarchy/shell.json`, in the widget's entry:
+The panel has a Settings section with a switch for each of these. A switch
+writes to the widget's entry in `~/.config/omarchy/shell.json`, so you can
+also set them by hand:
 
 | Key | Default | What it does |
 |---|---|---|
 | `showBattery` | `true` | Show the battery percent next to the bar icon |
+| `autoPause` | `true` | Pause the music when a pod comes out |
 
 ## Tested with
 
@@ -109,9 +118,24 @@ with metadata, battery, and mode packets. Writing a mode is one control
 command packet on the same channel, which is why `watch` reads mode names
 from stdin.
 
-The packet format was worked out by the LibrePods project. This plugin
-implements a small part of it.
+## Credit
+
+This plugin exists because of [LibrePods](https://github.com/librepods-org/librepods)
+by Kavish Devar. That project did the hard part: it reverse-engineered Apple's
+AAP protocol and wrote down what every packet means. The handshake, the
+opcodes, the battery layout, the control command for the listening mode, and
+the 300 ms gap that the AirPods need after the handshake all come from reading
+its source.
+
+No code was copied. The packet layouts are facts about Apple's protocol, and
+this plugin implements a small part of them in Python.
+
+## Donations
+
+If this plugin is useful to you, the Sponsor button in the sidebar takes you
+to GitHub Sponsors and Buy Me a Coffee. Very welcome, never expected.
 
 ## License
 
-MIT
+MIT, the same license as Omarchy, so this code can move into Omarchy if it
+ever belongs there. LibrePods is GPL-3.0; no code from it is used here.

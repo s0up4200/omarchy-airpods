@@ -1,8 +1,9 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # Read and control AirPods over Apple's AAP protocol: noise control mode,
-# per-pod battery, and the model. Standard Bluetooth profiles do not carry
-# any of this, so it speaks the vendor protocol on L2CAP PSM 0x1001.
+# per-pod battery, in-ear status, and the model. Standard Bluetooth profiles
+# do not carry any of this, so it speaks the vendor protocol on L2CAP PSM
+# 0x1001.
 #
 # Only one client can hold that channel. Run LibrePods or this, never both:
 # the AirPods ignore commands from the second client.
@@ -40,7 +41,8 @@ MODE_NAMES = {v: k for k, v in MODES.items()}
 COMPONENTS = {0x01: "headphone", 0x02: "right", 0x04: "left", 0x08: "case"}
 
 LISTENING_MODE = 0x0D  # control command identifier
-OP_BATTERY, OP_CONTROL, OP_INFO = 0x04, 0x09, 0x1D
+OP_BATTERY, OP_EAR, OP_CONTROL, OP_INFO = 0x04, 0x06, 0x09, 0x1D
+EAR_STATES = {0x00: "in_ear", 0x01: "out_of_ear", 0x02: "in_case", 0x03: "disconnected"}
 
 
 def connected_address():
@@ -75,6 +77,9 @@ def parse(packet, state):
                 # reading. Report it as unknown rather than as an empty pod.
                 state["battery"][name] = None if status == 0x04 else level
 
+    elif opcode == OP_EAR and len(payload) >= 4:
+        state["ear"] = [EAR_STATES.get(payload[2]), EAR_STATES.get(payload[3])]
+
     elif opcode == OP_INFO and len(payload) >= 8:
         # A run of NUL-separated strings: name, model, manufacturer, then
         # serial numbers and firmware versions. Only the first two are used;
@@ -101,7 +106,7 @@ def open_channel(address, timeout=5):
 
 def status(address):
     state = {"connected": True, "address": address, "name": None, "model": None,
-             "mode": None, "battery": {}}
+             "mode": None, "battery": {}, "ear": None}
     sock = open_channel(address)
     # The AirPods drop packets that arrive too soon after the handshake, so
     # keep the same spacing LibrePods uses.
@@ -139,7 +144,7 @@ def watch():
                 sock.send(NOTIFICATIONS)
                 sock.settimeout(None)
                 state = {"connected": True, "address": address, "name": None,
-                         "model": None, "mode": None, "battery": {}}
+                         "model": None, "mode": None, "battery": {}, "ear": None}
                 last = ""
                 while True:
                     # Read the file descriptor, not sys.stdin: a buffered read
@@ -172,7 +177,7 @@ def watch():
 
 def selftest():
     """Parse packets captured from AirPods Pro (A3047), no Bluetooth needed."""
-    state = {"battery": {}, "mode": None}
+    state = {"battery": {}, "mode": None, "ear": None}
     parse(bytes.fromhex("0400040004000302015e020104015f02010801000401"), state)
     assert state["battery"] == {"right": 94, "left": 95, "case": None}, state
     parse(bytes.fromhex("0400040009000d04000000"), state)
@@ -180,6 +185,8 @@ def selftest():
     parse(bytes.fromhex("040004001d0002df000400" + b"AirPods Pro".hex()
                         + "00" + b"A3047".hex() + "00" + b"Apple Inc.".hex()), state)
     assert state["name"] == "AirPods Pro" and state["model"] == "A3047", state
+    parse(bytes.fromhex("0400040006000100"), state)
+    assert state["ear"] == ["out_of_ear", "in_ear"], state
     parse(bytes.fromhex("04000400080002000100"), state)  # unknown opcode
     print("ok")
 
