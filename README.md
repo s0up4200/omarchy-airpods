@@ -181,5 +181,4 @@ to GitHub Sponsors and Buy Me a Coffee. Very welcome, never expected.
 
 ## License
 
-MIT, the same license as Omarchy, so this code can move into Omarchy if it
-ever belongs there. LibrePods is GPL-3.0; no code from it is used here.
+MIT
