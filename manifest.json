@@ -20,7 +20,7 @@
     "defaultSection": "right",
     "defaults": {
       "showBattery": true,
-      "autoPause": true
+      "earBehavior": "One out"
     },
     "schema": [
       {
@@ -29,9 +29,16 @@
         "label": "Show battery percent in the bar"
       },
       {
-        "key": "autoPause",
-        "type": "boolean",
-        "label": "Pause the music when a pod comes out"
+        "key": "earBehavior",
+        "type": "enum",
+        "label": "Pause the music",
+        "options": [
+          "One out",
+          "Both out",
+          "Never"
+        ],
+        "defaultValue": "One out",
+        "description": "When a pod out of your ear stops the music."
       }
     ]
   }

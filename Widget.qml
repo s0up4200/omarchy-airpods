@@ -25,7 +25,10 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property bool showBattery: setting("showBattery", true) === true
-  readonly property bool autoPause: setting("autoPause", true) === true
+  // autoPause shipped as a boolean in 0.1.0. A stored false meant never;
+  // anything else meant the old one-pod rule.
+  readonly property string earBehavior:
+    setting("earBehavior", "") || (setting("autoPause") === false ? "Never" : "One out")
 
   property bool connected: false
   property string address: ""
@@ -107,10 +110,10 @@ Panel {
 
     var ear = connected ? data.ear : null
     if (ear) {
-      // A pod out of your ear stops the music, even when the other one is
-      // still in. A pod resting in the case does not: that is how you listen
-      // with one pod.
-      var wearing = ear.indexOf("out_of_ear") < 0 && ear.indexOf("in_ear") >= 0
+      // A pod in the case is not a pod out of your ear: that is how you
+      // listen with one pod.
+      var out = ear.filter(function(state) { return state === "out_of_ear" }).length
+      var wearing = earBehavior === "Both out" ? out < 2 : out < 1
       if (wearing !== inEar) {
         inEar = wearing
         applyEarChange()
@@ -123,7 +126,7 @@ Panel {
   function applyEarChange() {
     // Pausing whenever a pod moves would also stop music that is playing on
     // the speakers while the AirPods sit connected in a pocket.
-    if (!autoPause || !isOutput) return
+    if (earBehavior === "Never" || !isOutput) return
 
     if (!inEar) {
       var players = Mpris.players ? Mpris.players.values : []
@@ -186,8 +189,8 @@ Panel {
     onTriggered: aap.running = true
   }
 
-  // One chip in a selectable row: the mode row, the adaptive row. Text,
-  // selection, and the click stay at the call site.
+  // One chip in a selectable row: modes, adaptive level, ear behaviour.
+  // Text, selection, and the click stay at the call site.
   component Chip: Button {
     required property var modelData
     bordered: true
@@ -435,10 +438,25 @@ Panel {
             text: "Settings"
           }
 
-          SettingRow {
-            label: "Pause when a pod comes out"
-            checked: root.autoPause
-            onToggled: root.updateSetting("autoPause", !root.autoPause)
+          Text {
+            text: "Pause the music"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            spacing: Style.spacing.md
+
+            Repeater {
+              model: ["One out", "Both out", "Never"]
+
+              Chip {
+                text: modelData
+                selected: modelData === root.earBehavior
+                onClicked: root.updateSetting("earBehavior", modelData)
+              }
+            }
           }
 
           SettingRow {

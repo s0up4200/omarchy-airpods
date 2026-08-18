@@ -9,9 +9,10 @@ protocol directly.
 
 ![the panel](preview.png)
 
-The plugin pauses the music when you take a pod out, and continues it when
-the pod goes back in. It acts only on a player that it paused itself, and
-only while the AirPods are the current audio output.
+The plugin pauses the music when a pod comes out of your ear, and continues
+it when the pod goes back in. The `earBehavior` setting picks the rule. The
+plugin acts only on a player that it paused itself, and only while the
+AirPods are the current audio output.
 
 The panel shows:
 
@@ -117,7 +118,7 @@ widget reads as off whichever value you type.
 | Key | Default | What it does |
 |---|---|---|
 | `showBattery` | `true` | Show the battery percent next to the bar icon |
-| `autoPause` | `true` | Pause the music when a pod comes out |
+| `earBehavior` | `One out` | When a pod out of your ear pauses the music: `One out`, `Both out`, or `Never` |
 
 ## Tested with
 
