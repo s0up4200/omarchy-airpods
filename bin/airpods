@@ -1,0 +1,148 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+# Read and control AirPods over Apple's AAP protocol: noise control mode,
+# per-pod battery, and in-ear status. Standard Bluetooth profiles do not
+# carry any of this, so it speaks the vendor protocol on L2CAP PSM 0x1001.
+#
+# Only one client can hold that channel. Run LibrePods or this, never both:
+# the AirPods ignore commands from the second client. See the README's
+# AirPods section.
+#
+# Usage:
+#   airpods status                              JSON on stdout
+#   airpods set off|anc|transparency|adaptive
+#   airpods selftest                            parse check, no Bluetooth
+import json
+import socket
+import subprocess
+import sys
+import time
+
+PSM = 0x1001
+HEADER = bytes([0x04, 0x00, 0x04, 0x00])
+HANDSHAKE = bytes([0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x02, 0x00] + [0x00] * 8)
+NOTIFICATIONS = HEADER + bytes([0x0F, 0x00, 0xFF, 0xFF, 0xFF, 0xFF])
+# The AirPods only report their listening mode after the feature flags are set.
+FEATURE_FLAGS = HEADER + bytes([0x4D, 0x00, 0xFF] + [0x00] * 7)
+
+MODES = {"off": 0x01, "anc": 0x02, "transparency": 0x03, "adaptive": 0x04}
+MODE_NAMES = {v: k for k, v in MODES.items()}
+COMPONENTS = {0x01: "headphone", 0x02: "right", 0x04: "left", 0x08: "case"}
+
+LISTENING_MODE = 0x0D  # control command identifier
+OP_BATTERY, OP_CONTROL = 0x04, 0x09
+
+
+def connected_address():
+    """MAC of the first connected AirPods, or None."""
+    out = subprocess.run(
+        ["bluetoothctl", "devices", "Connected"],
+        capture_output=True, text=True,
+    ).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and "airpods" in parts[2].lower():
+            return parts[1]
+    return None
+
+
+def parse(packet, state):
+    """Fold one AAP packet into state. Unknown opcodes are ignored."""
+    if not packet.startswith(HEADER) or len(packet) < 6:
+        return
+    payload = packet[4:]
+    opcode = payload[0]
+
+    if opcode == OP_BATTERY:
+        count = payload[2]
+        if len(payload) < 3 + count * 5:
+            return
+        for i in range(count):
+            component, _, level, status = payload[3 + i * 5:7 + i * 5]
+            name = COMPONENTS.get(component)
+            if name:
+                # A disconnected component reports level 0, which is not a
+                # reading. Report it as unknown rather than as an empty pod.
+                state["battery"][name] = None if status == 0x04 else level
+
+    elif opcode == OP_CONTROL and len(payload) >= 7:
+        if payload[2] == LISTENING_MODE:
+            state["mode"] = MODE_NAMES.get(payload[3])
+
+
+def open_channel(address, timeout=5):
+    sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+    sock.settimeout(timeout)
+    sock.connect((address, PSM))
+    sock.send(HANDSHAKE)
+    return sock
+
+
+def status(address):
+    state = {"connected": True, "address": address, "mode": None, "battery": {}}
+    sock = open_channel(address)
+    # The AirPods drop packets that arrive too soon after the handshake, so
+    # keep the same spacing LibrePods uses.
+    time.sleep(0.3)
+    sock.send(FEATURE_FLAGS)
+    time.sleep(0.3)
+    sock.send(NOTIFICATIONS)
+    sock.settimeout(2)
+    # The AirPods push their state as a burst of notifications. Stop as soon
+    # as mode and battery are in, so a good read does not wait out the timeout.
+    while True:
+        try:
+            parse(sock.recv(1024), state)
+        except socket.timeout:
+            break
+        if state["mode"] and state["battery"]:
+            break
+    sock.close()
+    return state
+
+
+def set_mode(address, mode):
+    sock = open_channel(address)
+    time.sleep(0.3)
+    sock.send(HEADER + bytes([0x09, 0x00, LISTENING_MODE, MODES[mode], 0x00, 0x00, 0x00]))
+    time.sleep(0.3)
+    sock.close()
+
+
+def selftest():
+    """Parse packets captured from AirPods Pro (A3048), no Bluetooth needed."""
+    state = {"battery": {}, "mode": None}
+    parse(bytes.fromhex("0400040004000302015e020104015f02010801000401"), state)
+    assert state["battery"] == {"right": 94, "left": 95, "case": None}, state
+    parse(bytes.fromhex("0400040009000d04000000"), state)
+    assert state["mode"] == "adaptive", state
+    parse(bytes.fromhex("04000400080002000100"), state)  # unknown opcode
+    print("ok")
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "status"
+
+    if command == "selftest":
+        return selftest()
+
+    address = connected_address()
+    if not address:
+        if command == "status":
+            print(json.dumps({"connected": False}))
+            return
+        sys.exit("airpods: no AirPods connected")
+
+    if command == "status":
+        print(json.dumps(status(address)))
+    elif command == "set":
+        mode = sys.argv[2] if len(sys.argv) > 2 else ""
+        if mode not in MODES:
+            sys.exit("airpods: set needs one of %s" % ", ".join(MODES))
+        set_mode(address, mode)
+    else:
+        sys.exit(__doc__ or "airpods: status | set <mode> | selftest")
+
+
+if __name__ == "__main__":
+    main()

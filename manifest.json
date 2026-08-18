@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "soup.airpods",
+  "name": "AirPods",
+  "version": "0.1.0",
+  "author": "soup",
+  "license": "MIT",
+  "description": "AirPods noise control, per-pod battery, and in-ear status in the Omarchy bar, over Apple's AAP protocol.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "AirPods",
+    "description": "Switch noise control mode and read per-pod battery.",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 60,
+      "showBattery": true
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 15,
+        "max": 3600,
+        "step": 15,
+        "defaultValue": 60
+      },
+      {
+        "key": "showBattery",
+        "type": "boolean",
+        "label": "Show battery percent in the bar",
+        "defaultValue": true
+      }
+    ]
+  }
+}
