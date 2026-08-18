@@ -36,6 +36,7 @@ Panel {
   // null until the device reports it, which is also what an unsupported
   // model looks like. Either way the row is dim and does nothing.
   property var conversationAwareness: null
+  property var oneBudANC: null
   property bool inEar: true
   // PipeWire names a Bluetooth sink after the MAC address, with underscores.
   readonly property bool isOutput: {
@@ -83,6 +84,7 @@ Panel {
     model = connected ? (data.model || "") : ""
     battery = connected && data.battery ? data.battery : ({})
     conversationAwareness = connected && data.ca !== undefined ? data.ca : null
+    oneBudANC = connected && data.onebud !== undefined ? data.onebud : null
 
     var ear = connected ? data.ear : null
     if (ear) {
@@ -369,6 +371,13 @@ Panel {
             checked: root.conversationAwareness === true
             enabled: root.conversationAwareness !== null
             onToggled: root.setToggle("ca", root.conversationAwareness)
+          }
+
+          SettingRow {
+            label: "One-Bud ANC"
+            checked: root.oneBudANC === true
+            enabled: root.oneBudANC !== null
+            onToggled: root.setToggle("onebud", root.oneBudANC)
           }
         }
 
