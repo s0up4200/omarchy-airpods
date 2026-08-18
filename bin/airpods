@@ -92,9 +92,10 @@ def parse(packet, state):
     elif opcode == OP_INFO and len(payload) >= 8:
         # A run of NUL-separated strings: name, model, manufacturer, then
         # serial numbers and firmware versions. Only the first two are used;
-        # the serial numbers stay out of the output on purpose.
-        fields = [f.decode("ascii") for f in payload[4:].split(b"\x00")
-                  if len(f) >= 2 and all(32 <= c < 127 for c in f)]
+        # the serial numbers stay out of the output on purpose. The name can
+        # carry any UTF-8 the phone put there ("Anders’s AirPods").
+        fields = [t for t in (c.decode(errors="ignore") for c in payload[4:].split(b"\x00"))
+                  if len(t) >= 2 and t.isprintable()]
         if fields:
             state["name"] = fields[0]
         if len(fields) > 1:
@@ -229,11 +230,15 @@ def selftest():
     assert state["onebud"] is True, state
     parse(bytes.fromhex("0400040009002e32000000"), state)
     assert state["adaptive_level"] == 50, state
-    parse(bytes.fromhex("040004001d0002df000400" + b"AirPods Pro".hex()
-                        + "00" + b"A3047".hex() + "00" + b"Apple Inc.".hex()), state)
-    assert state["name"] == "AirPods Pro" and state["model"] == "A3047", state
     parse(bytes.fromhex("0400040006000100"), state)
     assert state["ear"] == ["out_of_ear", "in_ear"], state
+    # AirPods Pro 3 name their owner, and the curly apostrophe is UTF-8.
+    # Dropping the field would shift the model into the name slot.
+    parse(bytes.fromhex("040004001d0002df000400"
+                        + "Anders’s AirPods Pro Gen 3".encode().hex()
+                        + "00" + b"A3064".hex() + "00" + b"Apple Inc.".hex()), state)
+    assert state["name"] == "Anders’s AirPods Pro Gen 3", state
+    assert state["model"] == "A3064", state
     parse(bytes.fromhex("04000400080002000100"), state)  # unknown opcode
 
     sent = []
