@@ -25,7 +25,10 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property bool showBattery: setting("showBattery", true) === true
-  readonly property bool autoPause: setting("autoPause", true) === true
+  // autoPause shipped as a boolean in 0.1.0. A stored false meant never;
+  // anything else meant the old one-pod rule.
+  readonly property string earBehavior:
+    setting("earBehavior", "") || (setting("autoPause") === false ? "Never" : "One out")
 
   property bool connected: false
   property string address: ""
@@ -33,6 +36,26 @@ Panel {
   property string deviceName: ""
   property string model: ""
   property var battery: ({})
+  property var charging: ({})
+  // null until the device reports it, which is also what an unsupported
+  // model looks like. Either way the row is dim and does nothing.
+  property var conversationAwareness: null
+  property var oneBudANC: null
+  property var adaptiveLevel: null
+
+  // Apple draws a slider. Three chips reuse the row idiom the modes already
+  // have, and the difference between 40 and 45 is not audible.
+  readonly property var adaptiveOptions: [
+    { value: 25, label: "Less" },
+    { value: 50, label: "Medium" },
+    { value: 75, label: "More" }
+  ]
+
+  // The device reports any value in 0-100; the nearest chip lights, so a
+  // level set from a phone still reads sensibly. A null level rounds to 25,
+  // but the chip row is hidden then, so nothing shows it.
+  readonly property int nearestAdaptive:
+    Math.min(75, Math.max(25, Math.round(adaptiveLevel / 25) * 25))
   property bool inEar: true
   // PipeWire names a Bluetooth sink after the MAC address, with underscores.
   readonly property bool isOutput: {
@@ -44,12 +67,15 @@ Panel {
   // hand stays stopped when the pods go back in.
   property var pausedPlayer: null
 
+  // AirPods Pro 3 (A3063-A3066, A3334-A3336) has no Off mode.
+  readonly property var pro3Models: ["A3063", "A3064", "A3065", "A3066",
+                                     "A3334", "A3335", "A3336"]
   readonly property var modeOptions: [
     { value: "off", label: "Off" },
     { value: "transparency", label: "Transparency" },
     { value: "adaptive", label: "Adaptive" },
     { value: "anc", label: "ANC" }
-  ]
+  ].slice(pro3Models.indexOf(model) < 0 ? 0 : 1)
 
   readonly property int lowestBattery: {
     var levels = []
@@ -62,7 +88,10 @@ Panel {
 
   function batteryText(component) {
     var level = battery ? battery[component] : undefined
-    return (level === undefined || level === null) ? "—" : level + "%"
+    if (level === undefined || level === null) return "—"
+    // A bolt beside the number, the way the power widget marks the wall.
+    // The Nerd Font glyph follows the text color; the emoji stays yellow.
+    return charging[component] ? level + "% 󱐋" : level + "%"
   }
 
   function applyStatus(text) {
@@ -79,13 +108,17 @@ Panel {
     deviceName = connected ? (data.name || "") : ""
     model = connected ? (data.model || "") : ""
     battery = connected && data.battery ? data.battery : ({})
+    charging = connected && data.charging ? data.charging : ({})
+    conversationAwareness = connected && data.ca !== undefined ? data.ca : null
+    oneBudANC = connected && data.onebud !== undefined ? data.onebud : null
+    adaptiveLevel = connected && data.adaptive_level !== undefined ? data.adaptive_level : null
 
     var ear = connected ? data.ear : null
     if (ear) {
-      // A pod out of your ear stops the music, even when the other one is
-      // still in. A pod resting in the case does not: that is how you listen
-      // with one pod.
-      var wearing = ear.indexOf("out_of_ear") < 0 && ear.indexOf("in_ear") >= 0
+      // A pod in the case is not a pod out of your ear: that is how you
+      // listen with one pod.
+      var out = ear.filter(function(state) { return state === "out_of_ear" }).length
+      var wearing = earBehavior === "Both out" ? out < 2 : out < 1
       if (wearing !== inEar) {
         inEar = wearing
         applyEarChange()
@@ -98,7 +131,7 @@ Panel {
   function applyEarChange() {
     // Pausing whenever a pod moves would also stop music that is playing on
     // the speakers while the AirPods sit connected in a pocket.
-    if (!autoPause || !isOutput) return
+    if (earBehavior === "Never" || !isOutput) return
 
     if (!inEar) {
       var players = Mpris.players ? Mpris.players.values : []
@@ -124,11 +157,23 @@ Panel {
     if (bar && bar.shell) bar.shell.updateEntryInline(moduleName, settings)
   }
 
+  function setToggle(key, value) {
+    if (!connected || value !== true && value !== false) return
+    // No optimistic paint: the device echoes the new value on the same
+    // channel, and a toggle that lies is worse than one that waits.
+    aap.write(key + (value === true ? " off\n" : " on\n"))
+  }
+
+  function setAdaptive(value) {
+    if (!connected) return
+    aap.write("adaptive " + value + "\n")
+  }
+
   function setMode(value) {
     if (!connected) return
     // Paint the new mode straight away; the next line from the watcher confirms it.
     mode = value
-    aap.write(value + "\n")
+    aap.write("mode " + value + "\n")
   }
 
   Process {
@@ -149,6 +194,16 @@ Panel {
     onTriggered: aap.running = true
   }
 
+  // One chip in a selectable row: modes, adaptive level, ear behaviour.
+  // Text, selection, and the click stay at the call site.
+  component Chip: Button {
+    required property var modelData
+    bordered: true
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    fontSize: Style.font.bodySmall
+  }
+
   component SettingRow: Item {
     property string label: ""
     property bool checked: false
@@ -156,6 +211,7 @@ Panel {
 
     width: parent ? parent.width : 0
     implicitHeight: Math.max(rowLabel.implicitHeight, rowSwitch.implicitHeight)
+    opacity: enabled ? 1.0 : 0.4
 
     Text {
       id: rowLabel
@@ -325,20 +381,56 @@ Panel {
             Repeater {
               model: root.modeOptions
 
-              Button {
-                required property var modelData
-
+              Chip {
                 text: modelData.label
                 // `selected` is the whole state model. A cursor flag as well
                 // would latch on and light a second chip.
                 selected: modelData.value === root.mode
-                bordered: true
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.bodySmall
                 onClicked: root.setMode(modelData.value)
               }
             }
+          }
+
+          Row {
+            spacing: Style.spacing.md
+            // The level only means anything while Adaptive is the live mode,
+            // which is when Apple shows it too.
+            visible: root.mode === "adaptive" && root.adaptiveLevel !== null
+
+            Repeater {
+              model: root.adaptiveOptions
+
+              Chip {
+                text: modelData.label
+                selected: root.nearestAdaptive === modelData.value
+                onClicked: root.setAdaptive(modelData.value)
+              }
+            }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          visible: root.connected
+
+          PanelSectionHeader {
+            width: parent.width
+            text: "Controls"
+          }
+
+          SettingRow {
+            label: "Conversation Awareness"
+            checked: root.conversationAwareness === true
+            enabled: root.conversationAwareness !== null
+            onToggled: root.setToggle("ca", root.conversationAwareness)
+          }
+
+          SettingRow {
+            label: "One-Bud ANC"
+            checked: root.oneBudANC === true
+            enabled: root.oneBudANC !== null
+            onToggled: root.setToggle("onebud", root.oneBudANC)
           }
         }
 
@@ -351,10 +443,25 @@ Panel {
             text: "Settings"
           }
 
-          SettingRow {
-            label: "Pause when a pod comes out"
-            checked: root.autoPause
-            onToggled: root.updateSetting("autoPause", !root.autoPause)
+          Text {
+            text: "Pause the music"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            spacing: Style.spacing.md
+
+            Repeater {
+              model: ["One out", "Both out", "Never"]
+
+              Chip {
+                text: modelData
+                selected: modelData === root.earBehavior
+                onClicked: root.updateSetting("earBehavior", modelData)
+              }
+            }
           }
 
           SettingRow {

@@ -10,11 +10,15 @@
 # The AirPods send the mode and the model once per Bluetooth connection, to
 # whichever client is on the channel at that moment. A client that connects
 # later gets battery levels and nothing else. `watch` therefore holds one
-# channel open and reports every change, and it takes mode names on stdin
-# so that writes go out on that same channel.
+# channel open and reports every change, and it takes `key value` commands
+# on stdin (`mode anc`) so that writes go out on that same channel.
+#
+# The protocol constants come from the reverse-engineering work of the
+# LibrePods project by Kavish Devar. No code is shared with it.
 #
 # Usage:
 #   airpods watch                               a JSON line per change
+#   airpods capture                             raw packets as hex, for fixtures
 #   airpods selftest                            parse check, no Bluetooth
 import json
 import os
@@ -34,8 +38,16 @@ FEATURE_FLAGS = HEADER + bytes([0x4D, 0x00, 0xFF] + [0x00] * 7)
 MODES = {"off": 0x01, "anc": 0x02, "transparency": 0x03, "adaptive": 0x04}
 MODE_NAMES = {v: k for k, v in MODES.items()}
 COMPONENTS = {0x01: "headphone", 0x02: "right", 0x04: "left", 0x08: "case"}
+# Battery status byte: 0x01 charging, 0x02 idle, 0x04 absent.
+STATUS_CHARGING, STATUS_ABSENT = 0x01, 0x04
 
 LISTENING_MODE = 0x0D  # control command identifier
+CONVERSATION_AWARENESS = 0x28
+ONE_BUD_ANC = 0x1B
+ADAPTIVE_LEVEL = 0x2E
+# The device answers 0x01 for on and 0x02 for off on every toggle identifier.
+TOGGLE_STATES = {0x01: True, 0x02: False}
+TOGGLES = {CONVERSATION_AWARENESS: "ca", ONE_BUD_ANC: "onebud"}
 OP_BATTERY, OP_EAR, OP_CONTROL, OP_INFO = 0x04, 0x06, 0x09, 0x1D
 EAR_STATES = {0x00: "in_ear", 0x01: "out_of_ear", 0x02: "in_case", 0x03: "disconnected"}
 
@@ -67,10 +79,12 @@ def parse(packet, state):
         for i in range(count):
             component, _, level, status = payload[3 + i * 5:7 + i * 5]
             name = COMPONENTS.get(component)
-            if name:
-                # A disconnected component reports level 0, which is not a
-                # reading. Report it as unknown rather than as an empty pod.
-                state["battery"][name] = None if status == 0x04 else level
+            if not name:
+                continue
+            # A disconnected component reports level 0 or 0xff, which is not
+            # a reading. Report it as unknown rather than as an empty pod.
+            state["battery"][name] = None if status == STATUS_ABSENT else level
+            state["charging"][name] = status == STATUS_CHARGING
 
     elif opcode == OP_EAR and len(payload) >= 4:
         state["ear"] = [EAR_STATES.get(payload[2]), EAR_STATES.get(payload[3])]
@@ -78,17 +92,23 @@ def parse(packet, state):
     elif opcode == OP_INFO and len(payload) >= 8:
         # A run of NUL-separated strings: name, model, manufacturer, then
         # serial numbers and firmware versions. Only the first two are used;
-        # the serial numbers stay out of the output on purpose.
-        fields = [f.decode("ascii") for f in payload[4:].split(b"\x00")
-                  if len(f) >= 2 and all(32 <= c < 127 for c in f)]
+        # the serial numbers stay out of the output on purpose. The name can
+        # carry any UTF-8 the phone put there ("Anders’s AirPods").
+        fields = [t for t in (c.decode(errors="ignore") for c in payload[4:].split(b"\x00"))
+                  if len(t) >= 2 and t.isprintable()]
         if fields:
             state["name"] = fields[0]
         if len(fields) > 1:
             state["model"] = fields[1]
 
     elif opcode == OP_CONTROL and len(payload) >= 7:
-        if payload[2] == LISTENING_MODE:
+        identifier = payload[2]
+        if identifier == LISTENING_MODE:
             state["mode"] = MODE_NAMES.get(payload[3])
+        elif identifier in TOGGLES:
+            state[TOGGLES[identifier]] = TOGGLE_STATES.get(payload[3])
+        elif identifier == ADAPTIVE_LEVEL:
+            state["adaptive_level"] = payload[3]
 
 
 def open_channel(address):
@@ -97,6 +117,31 @@ def open_channel(address):
     sock.connect((address, PSM))
     sock.send(HANDSHAKE)
     return sock
+
+
+def control(identifier, value):
+    """One AAP control packet: header, identifier, value, padding."""
+    return HEADER + bytes([0x09, 0x00, identifier, value, 0, 0, 0])
+
+
+def send_command(sock, state, key, value):
+    """Apply one `key value` command. Unknown keys and values are ignored.
+
+    The AirPods never echo control writes back, so record the value here;
+    the next connection's dump corrects drift.
+    """
+    if key == "mode" and value in MODES:
+        sock.send(control(LISTENING_MODE, MODES[value]))
+        state["mode"] = value
+    elif key == "ca" and value in ("on", "off"):
+        sock.send(control(CONVERSATION_AWARENESS, 0x01 if value == "on" else 0x02))
+        state["ca"] = value == "on"
+    elif key == "onebud" and value in ("on", "off"):
+        sock.send(control(ONE_BUD_ANC, 0x01 if value == "on" else 0x02))
+        state["onebud"] = value == "on"
+    elif key == "adaptive" and value.isdigit() and int(value) <= 100:
+        sock.send(control(ADAPTIVE_LEVEL, int(value)))
+        state["adaptive_level"] = int(value)
 
 
 def watch():
@@ -115,7 +160,8 @@ def watch():
                 sock.send(NOTIFICATIONS)
                 sock.settimeout(None)
                 state = {"connected": True, "address": address, "name": None,
-                         "model": None, "mode": None, "battery": {}, "ear": None}
+                         "model": None, "mode": None, "battery": {}, "charging": {},
+                         "ear": None, "ca": None, "onebud": None, "adaptive_level": None}
                 last = ""
                 while True:
                     # Read the file descriptor, not sys.stdin: a buffered read
@@ -132,10 +178,9 @@ def watch():
                         command = os.read(0, 4096)
                         if not command:
                             return  # the caller went away
-                        for name in command.decode().split():
-                            if name in MODES:
-                                sock.send(HEADER + bytes([0x09, 0x00, LISTENING_MODE,
-                                                          MODES[name], 0, 0, 0]))
+                        words = command.decode().split()
+                        for key, value in zip(words[::2], words[1::2]):
+                            send_command(sock, state, key, value)
                     line = json.dumps(state)
                     if line != last:
                         print(line, flush=True)
@@ -146,19 +191,64 @@ def watch():
         time.sleep(5)
 
 
+def capture():
+    """Print every packet as hex. For building selftest fixtures."""
+    address = connected_address()
+    if not address:
+        sys.exit("airpods: no AirPods connected")
+    with open_channel(address) as sock:
+        time.sleep(0.3)
+        sock.send(FEATURE_FLAGS)
+        time.sleep(0.3)
+        sock.send(NOTIFICATIONS)
+        sock.settimeout(None)
+        while True:
+            packet = sock.recv(1024)
+            if not packet:
+                return
+            print(packet.hex(), flush=True)
+
+
 def selftest():
     """Parse packets captured from AirPods Pro (A3047), no Bluetooth needed."""
-    state = {"battery": {}, "mode": None, "ear": None}
+    state = {"battery": {}, "charging": {}, "mode": None, "ear": None, "ca": None,
+             "onebud": None, "adaptive_level": None}
     parse(bytes.fromhex("0400040004000302015e020104015f02010801000401"), state)
     assert state["battery"] == {"right": 94, "left": 95, "case": None}, state
+    # Right pod in the case and charging, left pod out, case absent. An
+    # absent case reports level 0xff, which is not a reading either.
+    parse(bytes.fromhex("04000400040003040164020102016401010801ff0401"), state)
+    assert state["charging"] == {"right": True, "left": False, "case": False}, state
+    assert state["battery"] == {"right": 100, "left": 100, "case": None}, state
     parse(bytes.fromhex("0400040009000d04000000"), state)
     assert state["mode"] == "adaptive", state
-    parse(bytes.fromhex("040004001d0002df000400" + b"AirPods Pro".hex()
-                        + "00" + b"A3047".hex() + "00" + b"Apple Inc.".hex()), state)
-    assert state["name"] == "AirPods Pro" and state["model"] == "A3047", state
+    parse(bytes.fromhex("0400040009002801000000"), state)
+    assert state["ca"] is True, state
+    parse(bytes.fromhex("0400040009002802000000"), state)
+    assert state["ca"] is False, state
+    parse(bytes.fromhex("0400040009001b01000000"), state)
+    assert state["onebud"] is True, state
+    parse(bytes.fromhex("0400040009002e32000000"), state)
+    assert state["adaptive_level"] == 50, state
     parse(bytes.fromhex("0400040006000100"), state)
     assert state["ear"] == ["out_of_ear", "in_ear"], state
+    # AirPods Pro 3 name their owner, and the curly apostrophe is UTF-8.
+    # Dropping the field would shift the model into the name slot.
+    parse(bytes.fromhex("040004001d0002df000400"
+                        + "Anders’s AirPods Pro Gen 3".encode().hex()
+                        + "00" + b"A3064".hex() + "00" + b"Apple Inc.".hex()), state)
+    assert state["name"] == "Anders’s AirPods Pro Gen 3", state
+    assert state["model"] == "A3064", state
     parse(bytes.fromhex("04000400080002000100"), state)  # unknown opcode
+
+    sent = []
+    sock = type("Sock", (), {"send": sent.append})()
+    send_command(sock, state, "ca", "on")
+    assert state["ca"] is True and sent[-1] == bytes.fromhex("0400040009002801000000"), (state, sent)
+    send_command(sock, state, "adaptive", "25")
+    assert state["adaptive_level"] == 25, state
+    send_command(sock, state, "bogus", "on")
+    assert len(sent) == 2, sent
     print("ok")
 
 
@@ -168,8 +258,11 @@ def main():
     if command == "selftest":
         return selftest()
 
+    if command == "capture":
+        return capture()
+
     if command != "watch":
-        sys.exit("airpods: watch | selftest")
+        sys.exit("airpods: watch | capture | selftest")
 
     watch()
 

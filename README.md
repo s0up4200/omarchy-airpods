@@ -5,24 +5,34 @@ AirPods noise control and battery in the [Omarchy](https://omarchy.org/) bar.
 Standard Bluetooth profiles carry audio and the media keys, but they do not
 carry noise control mode, per-pod battery, or in-ear status. Apple sends these
 over a vendor protocol (AAP) on L2CAP PSM `0x1001`. This plugin speaks that
-protocol directly.
+protocol directly: the whole backend is one Python file on the standard
+library. Nothing to compile, no systemd unit of its own, no companion app,
+and one license for the whole repository.
 
 ![the panel](preview.png)
 
-The plugin pauses the music when you take a pod out, and continues it when
-the pod goes back in. It acts only on a player that it paused itself, and
-only while the AirPods are the current audio output.
+The plugin pauses the music when a pod comes out of your ear, and continues
+it when the pod goes back in. The `earBehavior` setting picks the rule. The
+plugin acts only on a player that it paused itself, and only while the
+AirPods are the current audio output.
 
 The panel shows:
 
 - The device name and the model number
-- The battery level of each pod, and of the case when it reports one
+- The battery level of each pod, and of the case when it reports one. A bolt
+  marks a component that charges.
 - Buttons for Off, Transparency, Adaptive, and ANC, with the current mode
-  selected
+  selected. The Off mode is absent on AirPods Pro 3, which has no such mode.
+- The adaptive noise level (Less, Medium, More) while Adaptive is the mode
+- Switches for Conversation Awareness and One-Bud ANC. A switch is dim until
+  the device reports the control.
 
 The bar shows an AirPods icon with the battery level of the lowest pod. The
 widget leaves the bar while no AirPods are connected, the way the microphone
 and media widgets do. Connecting is BlueZ's work, not the panel's.
+
+Volume and output selection stay in the stock Audio panel, which already
+does them well. This panel only adds what the stock panels cannot see.
 
 ## Install
 
@@ -51,8 +61,11 @@ Restart Bluetooth and reconnect the AirPods:
 sudo systemctl restart bluetooth
 ```
 
-There are no other dependencies. The backend is one Python script that uses
-the standard library only.
+Removal is one command; only the `DeviceID` line above stays behind:
+
+```bash
+omarchy plugin remove soup.airpods
+```
 
 ## Do not run LibrePods at the same time
 
@@ -60,9 +73,8 @@ The AirPods accept one AAP client. If [LibrePods](https://github.com/librepods-o
 holds the channel, this plugin reads stale data and its commands are ignored.
 Use one or the other.
 
-LibrePods still does more: conversational awareness, hearing aid settings,
-head gestures, and renaming. This plugin gives you noise control, battery,
-and auto-pause from the bar.
+LibrePods still does more: hearing aid settings, head gestures, and
+renaming. This plugin gives you the everyday controls from the bar.
 
 ## Command line
 
@@ -70,8 +82,11 @@ The backend works on its own:
 
 ```bash
 ~/.config/omarchy/plugins/soup.airpods/bin/airpods watch
+~/.config/omarchy/plugins/soup.airpods/bin/airpods capture
 ~/.config/omarchy/plugins/soup.airpods/bin/airpods selftest
 ```
+
+`capture` prints every raw packet as hex, for building `selftest` fixtures.
 
 `watch` holds the channel open and prints a line for each change, which is
 what the panel runs:
@@ -79,14 +94,18 @@ what the panel runs:
 ```json
 {"connected": true, "address": "…", "name": "AirPods Pro", "model": "A3047",
  "mode": "adaptive", "battery": {"left": 90, "right": 85, "case": null},
- "ear": ["in_ear", "in_ear"]}
+ "charging": {"left": false, "right": false, "case": false},
+ "ear": ["in_ear", "in_ear"], "ca": false, "onebud": false,
+ "adaptive_level": 50}
 ```
 
 The AirPods report the mode and the model one time for each Bluetooth
 connection, to the client that holds the channel at that moment. A client
 that connects later reads almost nothing. This is why the panel keeps one
-`watch` open. `watch` also takes mode names on stdin, because a write must
-go out on the channel that the AirPods are listening to.
+`watch` open. `watch` also takes `key value` commands on stdin (`mode anc`,
+`ca on`, `onebud off`, `adaptive 50`), because a write must go out on the
+channel that the AirPods are listening to. A control the device never
+reported is `null`, which is how an unsupported model reads.
 
 A `null` battery level means the component did not report one, and the panel
 shows `—`. The case does this while the pods are in your ears. It also does it
@@ -103,9 +122,9 @@ when you put one pod in the case, because that disconnects the other pod.
 
 ## Settings
 
-The panel has a Settings section with a switch for each of these. A switch
-writes to the widget's entry in `~/.config/omarchy/shell.json`. The same keys
-take a value from the command line:
+The panel has a Settings section for these. A change writes to the widget's
+entry in `~/.config/omarchy/shell.json`. The same keys take a value from the
+command line:
 
 ```bash
 omarchy bar set soup.airpods showBattery false --json
@@ -117,12 +136,13 @@ widget reads as off whichever value you type.
 | Key | Default | What it does |
 |---|---|---|
 | `showBattery` | `true` | Show the battery percent next to the bar icon |
-| `autoPause` | `true` | Pause the music when a pod comes out |
+| `earBehavior` | `One out` | When a pod out of your ear pauses the music: `One out`, `Both out`, or `Never` |
 
 ## Tested with
 
-AirPods Pro (models A3047 and A3048) on Omarchy 4, BlueZ 5.87. Other AirPods
-models use the same protocol, but they are not tested. Reports are welcome.
+AirPods Pro 2 (models A3047 and A3048) and AirPods Pro 3 (model A3064) on
+Omarchy 4, BlueZ 5.87. Other AirPods models use the same protocol, but they
+are not tested. Reports are welcome.
 
 ## Development
 
@@ -137,9 +157,10 @@ omarchy restart shell
 
 `bin/airpods` connects to L2CAP PSM `0x1001`, sends the AAP handshake, then
 asks for the feature flags and the notification stream. The AirPods answer
-with metadata, battery, and mode packets. Writing a mode is one control
-command packet on the same channel, which is why `watch` reads mode names
-from stdin.
+with metadata, battery, and control packets. Writing a control is one
+command packet on the same channel, which is why `watch` reads commands
+from stdin. The AirPods never echo a control write back to the sender, so
+`watch` keeps the value it sent until the next connection's dump corrects it.
 
 ## Credit
 

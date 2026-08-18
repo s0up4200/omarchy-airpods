@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "soup.airpods",
   "name": "AirPods",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "soup",
   "license": "MIT",
-  "description": "AirPods noise control, per-pod battery, and ear-detection auto-pause in the Omarchy bar, over Apple's AAP protocol.",
+  "description": "AirPods noise and battery controls in the Omarchy bar, over Apple's AAP protocol.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,13 +14,13 @@
   },
   "barWidget": {
     "displayName": "AirPods",
-    "description": "Switch noise control mode and read per-pod battery.",
+    "description": "Switch noise modes, read per-pod battery and charging.",
     "category": "Audio",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
       "showBattery": true,
-      "autoPause": true
+      "earBehavior": "One out"
     },
     "schema": [
       {
@@ -29,9 +29,16 @@
         "label": "Show battery percent in the bar"
       },
       {
-        "key": "autoPause",
-        "type": "boolean",
-        "label": "Pause the music when a pod comes out"
+        "key": "earBehavior",
+        "type": "enum",
+        "label": "Pause the music",
+        "options": [
+          "One out",
+          "Both out",
+          "Never"
+        ],
+        "defaultValue": "One out",
+        "description": "When a pod out of your ear stops the music."
       }
     ]
   }
